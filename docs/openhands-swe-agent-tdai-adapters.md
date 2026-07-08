@@ -206,3 +206,6 @@ Clone-based launcher validation:
 - Re-ran adapter tests from the cloned checkout.
 
 Detailed clone validation commands are recorded in `src/adapters/ISSUE_235_SUBMISSION_CN.md`.
+
+A clone-to-real-SWE-bench quick start and E2E verification record is available
+in `src/adapters/QUICKSTART_E2E_CN.md`.
