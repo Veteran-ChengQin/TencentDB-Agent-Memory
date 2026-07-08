@@ -381,6 +381,8 @@ python -m tdai_openhands.launcher \
 2. OpenHands agent 解题：把 recall context 放入任务 prompt，并可配置 TDAI MCP 搜索工具。
 3. `tdai_openhands.runner capture`：任务结束后把 events / trajectory / patch / metadata 写回 TDAI。
 
+注意：`tdai_openhands.runner recall` **不会启动 OpenHands**。它只调用 TDAI Gateway，把召回结果写入 `recall.json` 或打印到 stdout。真正启动 OpenHands 的入口是 `tdai_openhands.launcher terminal`、`agent-canvas`、`make run`，或者你自己的 OpenHands SDK / App Server runner。
+
 adapter 提供的是稳定边界命令，而不是强绑定某个 OpenHands 版本的 runner。因此实际 E2E runner 可以由你的 OpenHands 版本决定。最小边界命令如下：
 
 ```bash
@@ -397,6 +399,46 @@ python -m tdai_openhands.runner \
   --problem-file "$ROOT/runs/pylint-4551/problem_statement.txt" \
   --tdai-run-id openhands-tdai-pylint-4551 \
   --output "$ROOT/runs/pylint-4551/tdai/recall.json"
+```
+
+此时只会生成：
+
+```text
+$ROOT/runs/pylint-4551/tdai/recall.json
+```
+
+可以检查召回内容：
+
+```bash
+python - <<'PY'
+import json
+import os
+from pathlib import Path
+
+p = Path(os.environ["ROOT"]) / "runs/pylint-4551/tdai/recall.json"
+data = json.loads(p.read_text())
+print("context_len:", len(data.get("context", "")))
+print(data.get("context", "")[:1200])
+print("errors:", {
+    "recall": (data.get("payload", {}).get("recall") or {}).get("_tdai_error"),
+    "l1_search": (data.get("payload", {}).get("l1_search") or {}).get("_tdai_error"),
+})
+PY
+```
+
+如果希望先人工验证，可以把 `context` 和 `problem_statement.txt` 合并到 OpenHands 的初始任务消息中。若你通过 OpenHands App Server API 启动任务，则使用 `prepare-request` 自动注入：
+
+```bash
+python -m tdai_openhands.runner \
+  --tdai-config src/adapters/openhands/configs/tdai-longterm-only.yaml \
+  prepare-request \
+  --request-file "$ROOT/runs/pylint-4551/openhands_start_request.json" \
+  --instance-id pylint-dev__pylint-4551 \
+  --repo pylint-dev/pylint \
+  --base-commit 99589b08de8c5a2c6cc61e13a37420a868c80599 \
+  --problem-file "$ROOT/runs/pylint-4551/problem_statement.txt" \
+  --tdai-run-id openhands-tdai-pylint-4551 \
+  --output "$ROOT/runs/pylint-4551/openhands_start_request.tdai.json"
 ```
 
 OpenHands 解题完成后：

@@ -72,6 +72,10 @@ export PYTHONPATH="/path/to/TencentDB-Agent-Memory/src/adapters/openhands:$PYTHO
 
 Generate a recall block:
 
+This command does **not** start OpenHands. It only talks to the TDAI Gateway and
+writes a recall context block that your OpenHands runner, App Server request, or
+manual task prompt can consume.
+
 ```bash
 python -m tdai_openhands.runner \
   --tdai-config /path/to/TencentDB-Agent-Memory/src/adapters/openhands/configs/tdai-longterm-only.yaml \
