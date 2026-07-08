@@ -287,9 +287,93 @@ seed:
 
 `post_session_end_wait_seconds` 用于给 L1/L2/L3 异步抽取留出时间。
 
-## 9. WSL 原生启动 OpenHands
+## 9. 准备 SWE-bench instance 输入
 
-### 9.1 交互式 OpenHands
+OpenHands recall / capture 示例会引用：
+
+```text
+$ROOT/runs/pylint-4551/problem_statement.txt
+```
+
+因此需要先从 SWE-bench Verified 数据集中取出 `pylint-dev__pylint-4551` 的 issue 描述。
+
+建议用一个独立的小环境准备数据，避免污染 OpenHands / SWE-agent 环境：
+
+```bash
+python3.12 -m venv "$ROOT/.venv-swebench-data"
+source "$ROOT/.venv-swebench-data/bin/activate"
+python -m pip install --upgrade pip
+python -m pip install datasets
+```
+
+如果 Hugging Face 下载较慢或出现未认证限流提示，可以设置自己的 token：
+
+```bash
+export HF_TOKEN="<optional-huggingface-token>"
+```
+
+写出 instance 文件：
+
+```bash
+mkdir -p "$ROOT/runs/pylint-4551/tdai"
+
+python - <<'PY'
+import json
+import os
+from pathlib import Path
+
+from datasets import load_dataset
+
+root = Path(os.environ["ROOT"])
+instance_id = "pylint-dev__pylint-4551"
+out_dir = root / "runs" / "pylint-4551"
+out_dir.mkdir(parents=True, exist_ok=True)
+
+dataset = load_dataset("princeton-nlp/SWE-bench_Verified", split="test")
+item = next(row for row in dataset if row["instance_id"] == instance_id)
+
+(out_dir / "instance.json").write_text(
+    json.dumps(dict(item), ensure_ascii=False, indent=2),
+    encoding="utf-8",
+)
+(out_dir / "problem_statement.txt").write_text(
+    item["problem_statement"].strip() + "\n",
+    encoding="utf-8",
+)
+(out_dir / "metadata.json").write_text(
+    json.dumps(
+        {
+            "instance_id": item["instance_id"],
+            "repo": item["repo"],
+            "base_commit": item["base_commit"],
+            "version": item.get("version"),
+            "dataset": "princeton-nlp/SWE-bench_Verified",
+            "split": "test",
+        },
+        ensure_ascii=False,
+        indent=2,
+    ),
+    encoding="utf-8",
+)
+
+print(out_dir / "problem_statement.txt")
+print("repo:", item["repo"])
+print("base_commit:", item["base_commit"])
+PY
+```
+
+确认：
+
+```bash
+sed -n '1,80p' "$ROOT/runs/pylint-4551/problem_statement.txt"
+cat "$ROOT/runs/pylint-4551/metadata.json"
+```
+
+如果你已经有自己的 SWE-bench instance JSON，也可以直接写出同名文件；后续命令只要求 `problem_statement.txt` 存在，并且 `repo/base_commit/instance_id` 与实际任务一致。
+
+## 10. WSL 原生启动 OpenHands
+
+### 10.1 交互式 OpenHands
 
 如果使用 Agent Canvas：
 
@@ -322,7 +406,7 @@ python -m tdai_openhands.launcher \
 
 注意：交互式 UI 启动本身只证明 launcher 能把 OpenHands 启动起来。任务级 recall / capture 需要在 OpenHands start request 或任务 runner 中显式调用 `tdai_openhands.runner`。
 
-### 9.2 SWE-bench E2E 模式
+### 10.2 SWE-bench E2E 模式
 
 真实 SWE-bench E2E 需要三个阶段：
 
@@ -365,7 +449,7 @@ python -m tdai_openhands.runner \
   --output "$ROOT/runs/pylint-4551/tdai/capture_response.json"
 ```
 
-## 10. WSL 原生启动 SWE-agent
+## 11. WSL 原生启动 SWE-agent
 
 SWE-agent adapter 已经能直接包装 `RunBatch`，因此 quick start 更直接。
 
@@ -410,7 +494,7 @@ launcher 会完成：
 
 注意：不要从包含 `docker/` 子目录的仓库根目录启动 SWE-agent launcher。某些 SWE-agent 版本的路径归一化逻辑可能把 `deployment.type: docker` 误处理成文件路径。建议从独立 run 目录启动，并使用绝对路径传入 launcher config。
 
-## 11. SWE-bench harness
+## 12. SWE-bench harness
 
 如果已经生成 predictions：
 
@@ -439,7 +523,7 @@ resolved=true/false
 - capture response 中 `l0_recorded > 0`。
 - harness 能正常读取 patch 并完成评测。
 
-## 12. 产物检查清单
+## 13. 产物检查清单
 
 OpenHands：
 
@@ -474,7 +558,7 @@ ls "$TDAI_DATA_DIR/scene_blocks" 2>/dev/null || true
 test -f "$TDAI_DATA_DIR/persona.md" && sed -n '1,120p' "$TDAI_DATA_DIR/persona.md"
 ```
 
-## 13. 已完成的本地 E2E 结果摘要
+## 14. 已完成的本地 E2E 结果摘要
 
 此前已用 `pylint-dev__pylint-4551` 做过真实 bug-fix 端到端验证：
 
