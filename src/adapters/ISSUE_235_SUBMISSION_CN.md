@@ -51,6 +51,7 @@ PR #385 的主要贡献是：
 ```text
 .gitignore
 package.json
+docs/openhands-swe-agent-tdai-adapters.md
 src/adapters/index.ts
 src/adapters/ISSUE_235_SUBMISSION_CN.md
 src/adapters/LAUNCHER_USAGE_CN.md
