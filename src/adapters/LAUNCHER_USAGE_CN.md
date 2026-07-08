@@ -103,3 +103,12 @@ python -m tdai_swe_agent.launcher \
 示例配置默认使用 `builtin: swe_bugfix`，会注入 5 条软件工程/bug-fix 经验。也可以改用 `seed.items` 或 `seed.file`。
 
 为避免 TDAI 后台 L1 抽取队列被快速连续请求跳过，launcher 默认每条 seed 间隔 `20s`，并在结束后调用 `/session/end`。这个设置偏保守，但更接近前面实验中能稳定抽取 L1/L2/L3 的方式。
+
+如果希望 seed 后马上启动真实 agent 并尽量看到召回效果，可以设置：
+
+```yaml
+seed:
+  post_session_end_wait_seconds: 60
+```
+
+它会在 `/session/end` 后额外等待一段时间，让后台 L1/L2/L3 异步抽取有机会完成。

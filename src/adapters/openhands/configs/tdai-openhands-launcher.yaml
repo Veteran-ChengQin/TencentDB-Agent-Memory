@@ -29,6 +29,7 @@ seed:
   session_id: "tdai-seed-software-engineering"
   delay_seconds: 20
   session_end: true
+  post_session_end_wait_seconds: 0
   items: []
   # file: "/path/to/software-engineering-seeds.txt"
 

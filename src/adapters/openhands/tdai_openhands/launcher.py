@@ -160,6 +160,10 @@ def _seed_gateway(
             encoding="utf-8",
         )
         print("[tdai] Seed session flushed with /session/end")
+    wait_seconds = float(seed_config.get("post_session_end_wait_seconds", 0))
+    if wait_seconds > 0:
+        print(f"[tdai] Waiting {wait_seconds:.0f}s for async memory extraction")
+        time.sleep(wait_seconds)
 
 
 def _run_openhands_terminal(
