@@ -1,0 +1,45 @@
+enabled: true
+
+gateway:
+  url: "http://127.0.0.1:8420"
+  api_key: null
+  api_key_env: "TDAI_GATEWAY_API_KEY"
+  timeout_seconds: 8.0
+  fail_open: true
+
+session:
+  scope: "batch"
+  run_id: null
+  user_id: "swe-agent"
+  custom_session_key: null
+
+recall:
+  enabled: true
+  mode: "once_per_instance"
+  max_context_chars: 6000
+  inject_position: "after_instance_prompt"
+  strip_tool_guide_if_no_tool_bundle: true
+  include_l1_search: true
+  l1_search_limit: 5
+
+tools:
+  enabled: false
+  path: null
+  gateway_url: null
+  api_key_env: "TDAI_GATEWAY_API_KEY"
+  propagate_api_key_env: true
+  memory_search_limit: 5
+  conversation_search_limit: 5
+
+capture:
+  enabled: true
+  when: "run_done"
+  include_raw_history: true
+  include_trajectory_summary: true
+  max_assistant_summary_chars: 4000
+  session_end_after_instance: false
+
+logs:
+  dir: "tdai"
+  save_recall_payloads: true
+  save_capture_payloads: true

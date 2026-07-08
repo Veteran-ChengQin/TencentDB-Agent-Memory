@@ -1,0 +1,286 @@
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shlex
+import subprocess
+import sys
+import time
+from pathlib import Path
+from typing import Any
+
+from .client import TdaiGatewayClient
+from .config import TdaiSweAgentConfig, load_config
+
+
+BUILTIN_SWEBENCH_SEEDS = [
+    "在 SWE-bench bug-fix 任务中，先运行或读取 FAIL_TO_PASS 针对性测试，再基于 issue 描述定位最小相关代码路径，避免一开始做大范围重构。",
+    "修复软件工程 bug 时，优先构造最小复现脚本或最小测试命令；确认失败现象后再修改代码，修改后重新运行同一个复现命令。",
+    "处理 pylint 或 pyreverse 相关问题时，优先检查 pylint/pyreverse/writer.py、inspector.py、diagrams.py 以及 dot graph 序列化逻辑，重点关注输出格式、label 序列化、edge/node 渲染问题。",
+    "在 pyreverse 图输出相关 bug 中，先检查 DOT 输出中的 node、edge、label、rankdir、package/module/class 关系，而不是优先怀疑 astroid 推断逻辑。",
+    "提交 SWE-bench bug-fix patch 前，删除临时 reproduce 脚本、inspect 脚本、debug 输出文件和生成的 dot 文件，只保留修复代码与必要测试。",
+]
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Launch SWE-agent with TencentDB Agent Memory.")
+    parser.add_argument(
+        "--launcher-config",
+        default=str(Path(__file__).resolve().parents[1] / "configs" / "tdai-sweagent-launcher.yaml"),
+        help="Path to the launcher YAML/JSON config.",
+    )
+    parser.add_argument("--tdai-config", help="Override the TDAI SWE-agent adapter config path.")
+    parser.add_argument("--skip-gateway", action="store_true", help="Do not check or auto-start the TDAI Gateway.")
+    parser.add_argument("--skip-seed", action="store_true", help="Skip seed memory injection.")
+    parser.add_argument("command", nargs="?", choices=("run", "seed"), default="run")
+    parser.add_argument("sweagent_args", nargs=argparse.REMAINDER)
+    args = parser.parse_args(argv)
+
+    launcher_path = Path(args.launcher_config).expanduser().resolve()
+    launcher = _read_mapping(launcher_path)
+    base_dir = launcher_path.parent
+
+    tdai_config_path = args.tdai_config or launcher.get("tdai_config")
+    tdai_config = load_config(_resolve_path(tdai_config_path, base_dir) if tdai_config_path else None)
+    log_dir = _resolve_path(launcher.get("log_dir", ".tdai-launcher/swe-agent"), base_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    _extend_pythonpath(launcher.get("swe_agent", {}), base_dir)
+    gateway_process: subprocess.Popen[str] | None = None
+    try:
+        if not args.skip_gateway:
+            gateway_process = _ensure_gateway(launcher.get("gateway", {}), tdai_config, base_dir, log_dir)
+        if args.command == "seed":
+            _seed_gateway(tdai_config, launcher.get("seed", {}), base_dir, log_dir)
+            return 0
+        if not args.skip_seed:
+            _seed_gateway(tdai_config, launcher.get("seed", {}), base_dir, log_dir)
+        extra_args = _strip_remainder_separator(args.sweagent_args)
+        return _run_swe_agent(launcher, tdai_config_path, base_dir, extra_args)
+    finally:
+        if gateway_process is not None and launcher.get("gateway", {}).get("stop_on_exit", True):
+            gateway_process.terminate()
+            try:
+                gateway_process.wait(timeout=8)
+            except subprocess.TimeoutExpired:
+                gateway_process.kill()
+
+
+def _ensure_gateway(
+    gateway_launcher: dict[str, Any],
+    tdai_config: TdaiSweAgentConfig,
+    base_dir: Path,
+    log_dir: Path,
+) -> subprocess.Popen[str] | None:
+    if _gateway_healthy(tdai_config):
+        print(f"[tdai] Gateway ready: {tdai_config.gateway.url}")
+        return None
+    if not bool(gateway_launcher.get("auto_start", False)):
+        raise SystemExit(f"TDAI Gateway is not reachable at {tdai_config.gateway.url}. Start it or set gateway.auto_start=true.")
+
+    command = _command(gateway_launcher.get("command"))
+    if not command:
+        raise SystemExit("gateway.command is required when gateway.auto_start=true")
+    cwd = _resolve_path(gateway_launcher.get("cwd", "."), base_dir)
+    env = _merged_env(gateway_launcher.get("env", {}))
+    stdout = (log_dir / "tdai-gateway.stdout.log").open("a", encoding="utf-8")
+    stderr = (log_dir / "tdai-gateway.stderr.log").open("a", encoding="utf-8")
+    print(f"[tdai] Starting Gateway: {' '.join(command)}")
+    process = subprocess.Popen(command, cwd=str(cwd), env=env, stdout=stdout, stderr=stderr, text=True)
+
+    timeout = float(gateway_launcher.get("startup_timeout_seconds", 45))
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if process.poll() is not None:
+            raise SystemExit(f"TDAI Gateway exited early with code {process.returncode}. See {log_dir}")
+        if _gateway_healthy(tdai_config):
+            print(f"[tdai] Gateway ready: {tdai_config.gateway.url}")
+            return process
+        time.sleep(1)
+    raise SystemExit(f"TDAI Gateway did not become ready within {timeout:.0f}s. See {log_dir}")
+
+
+def _gateway_healthy(tdai_config: TdaiSweAgentConfig) -> bool:
+    try:
+        data = TdaiGatewayClient(tdai_config.gateway).health()
+    except Exception:
+        return False
+    return "_tdai_error" not in data
+
+
+def _seed_gateway(
+    tdai_config: TdaiSweAgentConfig,
+    seed_config: dict[str, Any],
+    base_dir: Path,
+    log_dir: Path,
+) -> None:
+    if not bool(seed_config.get("enabled", False)):
+        return
+    items = _seed_items(seed_config, base_dir)
+    if not items:
+        print("[tdai] Seed enabled but no seed items were provided.")
+        return
+
+    session_key = str(seed_config.get("session_key") or "tdai-seed/software-engineering")
+    session_id = str(seed_config.get("session_id") or "tdai-seed-software-engineering")
+    user_id = str(seed_config.get("user_id") or tdai_config.session.user_id)
+    delay_seconds = float(seed_config.get("delay_seconds", 20))
+    assistant_ack = str(seed_config.get("assistant_ack") or "已记录这条工程经验。")
+    client = TdaiGatewayClient(tdai_config.gateway)
+    log_path = log_dir / "seed-capture.jsonl"
+
+    print(f"[tdai] Seeding {len(items)} engineering memories into session_key={session_key!r}")
+    base_timestamp = int(time.time() * 1000) + 5000
+    with log_path.open("a", encoding="utf-8") as log_file:
+        for index, item in enumerate(items, start=1):
+            timestamp = base_timestamp + index * 2000
+            messages = [
+                {"role": "user", "content": item, "timestamp": timestamp},
+                {"role": "assistant", "content": assistant_ack, "timestamp": timestamp + 1000},
+            ]
+            result = client.capture(
+                user_content=item,
+                assistant_content=assistant_ack,
+                session_key=session_key,
+                session_id=session_id,
+                user_id=user_id,
+                messages=messages,
+            )
+            log_file.write(json.dumps({"index": index, "item": item, "result": result.raw}, ensure_ascii=False) + "\n")
+            log_file.flush()
+            print(f"[tdai] Seed {index}/{len(items)} captured; l0_recorded={result.l0_recorded}")
+            if delay_seconds > 0 and index < len(items):
+                time.sleep(delay_seconds)
+
+    if bool(seed_config.get("session_end", True)):
+        response = client.session_end(session_key=session_key, user_id=user_id)
+        (log_dir / "seed-session-end.json").write_text(
+            json.dumps(response, ensure_ascii=False, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        print("[tdai] Seed session flushed with /session/end")
+
+
+def _run_swe_agent(
+    launcher: dict[str, Any],
+    tdai_config_path: str | None,
+    base_dir: Path,
+    extra_args: list[str],
+) -> int:
+    from .runner import run_from_cli
+
+    swe_cfg = launcher.get("swe_agent", {})
+    args: list[str] = []
+    if tdai_config_path:
+        args.extend(["--tdai-config", str(_resolve_path(tdai_config_path, base_dir))])
+    run_id = swe_cfg.get("tdai_run_id")
+    if run_id:
+        args.extend(["--tdai-run-id", str(run_id)])
+    args.extend(str(part) for part in swe_cfg.get("args", []) or [])
+    args.extend(extra_args)
+    print(f"[tdai] Launching SWE-agent through TDAI adapter with {len(args)} CLI args")
+    run_from_cli(args)
+    return 0
+
+
+def _extend_pythonpath(swe_cfg: dict[str, Any], base_dir: Path) -> None:
+    paths = [str(Path(__file__).resolve().parents[1])]
+    paths.extend(str(_resolve_path(path, base_dir)) for path in swe_cfg.get("python_paths", []) or [])
+    current = os.environ.get("PYTHONPATH", "")
+    os.environ["PYTHONPATH"] = os.pathsep.join([*paths, current]).rstrip(os.pathsep)
+    for path in reversed(paths):
+        if path and path not in sys.path:
+            sys.path.insert(0, path)
+
+
+def _seed_items(seed_config: dict[str, Any], base_dir: Path) -> list[str]:
+    items: list[str] = []
+    if seed_config.get("builtin") == "swe_bugfix":
+        items.extend(BUILTIN_SWEBENCH_SEEDS)
+    seed_file = seed_config.get("file")
+    if seed_file:
+        items.extend(_read_seed_file(_resolve_path(seed_file, base_dir)))
+    for item in seed_config.get("items", []) or []:
+        if isinstance(item, str):
+            text = item
+        elif isinstance(item, dict):
+            text = str(item.get("content") or item.get("text") or "")
+        else:
+            text = str(item)
+        text = text.strip()
+        if text:
+            items.append(text)
+    return items
+
+
+def _read_seed_file(path: Path) -> list[str]:
+    raw = path.read_text(encoding="utf-8-sig")
+    if path.suffix.lower() == ".json":
+        data = json.loads(raw)
+    elif path.suffix.lower() in {".yaml", ".yml"}:
+        try:
+            import yaml  # type: ignore
+        except ImportError as exc:
+            raise RuntimeError("PyYAML is required to read YAML seed files") from exc
+        data = yaml.safe_load(raw)
+    else:
+        return [part.strip() for part in raw.split("\n\n") if part.strip()]
+    if isinstance(data, dict):
+        data = data.get("items", [])
+    items: list[str] = []
+    for item in data or []:
+        if isinstance(item, dict):
+            text = str(item.get("content") or item.get("text") or "").strip()
+        else:
+            text = str(item).strip()
+        if text:
+            items.append(text)
+    return items
+
+
+def _read_mapping(path: Path) -> dict[str, Any]:
+    raw = path.read_text(encoding="utf-8-sig")
+    if path.suffix.lower() == ".json":
+        data = json.loads(raw)
+    else:
+        try:
+            import yaml  # type: ignore
+        except ImportError as exc:
+            raise RuntimeError("PyYAML is required to load launcher YAML config files") from exc
+        data = yaml.safe_load(raw)
+    if not isinstance(data, dict):
+        raise ValueError(f"launcher config must be a mapping: {path}")
+    return data
+
+
+def _resolve_path(value: Any, base_dir: Path) -> Path:
+    path = Path(os.path.expandvars(os.path.expanduser(str(value))))
+    if not path.is_absolute():
+        path = base_dir / path
+    return path.resolve()
+
+
+def _command(value: Any) -> list[str]:
+    if value is None or value == "":
+        return []
+    if isinstance(value, str):
+        return shlex.split(value, posix=os.name != "nt")
+    return [str(part) for part in value]
+
+
+def _merged_env(extra: dict[str, Any]) -> dict[str, str]:
+    env = os.environ.copy()
+    for key, value in (extra or {}).items():
+        if value is None:
+            continue
+        env[str(key)] = os.path.expandvars(os.path.expanduser(str(value)))
+    return env
+
+
+def _strip_remainder_separator(args: list[str]) -> list[str]:
+    return args[1:] if args and args[0] == "--" else args
+
+
+if __name__ == "__main__":
+    sys.exit(main())

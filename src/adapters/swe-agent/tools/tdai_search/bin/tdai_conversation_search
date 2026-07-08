@@ -1,0 +1,66 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+
+
+def main() -> int:
+    query, limit = parse_query_and_limit(sys.argv[1:], int(os.getenv("TDAI_CONVERSATION_SEARCH_LIMIT", "5")))
+    if not query:
+        print("Usage: tdai_conversation_search <query> [limit]")
+        return 0
+    payload: dict[str, object] = {"query": query, "limit": limit}
+    session_key = os.getenv("TDAI_SESSION_KEY")
+    if session_key:
+        payload["session_key"] = session_key
+    result = post_json("/search/conversations", payload)
+    if "error" in result:
+        print(f"TDAI conversation search failed: {result['error']}")
+        return 0
+    text = str(result.get("results") or "").strip()
+    total = int(result.get("total") or 0)
+    if not text:
+        print(f"No TDAI conversations found for {query!r}.")
+        return 0
+    print(f"TDAI conversation search results ({total} hits):")
+    print(text)
+    return 0
+
+
+def parse_query_and_limit(args: list[str], default_limit: int) -> tuple[str, int]:
+    if not args:
+        return "", default_limit
+    limit = default_limit
+    if len(args) > 1 and args[-1].isdigit():
+        limit = int(args[-1])
+        args = args[:-1]
+    return " ".join(args).strip(), max(1, min(limit, 20))
+
+
+def post_json(path: str, payload: dict[str, object]) -> dict[str, object]:
+    base_url = os.getenv("TDAI_GATEWAY_URL", "http://host.docker.internal:8420").rstrip("/")
+    api_key_env = os.getenv("TDAI_GATEWAY_API_KEY_ENV", "TDAI_GATEWAY_API_KEY")
+    api_key = os.getenv(api_key_env)
+    headers = {"Accept": "application/json", "Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    request = urllib.request.Request(
+        f"{base_url}{path}",
+        data=json.dumps(payload).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=float(os.getenv("TDAI_GATEWAY_TIMEOUT", "8"))) as response:
+            body = response.read().decode("utf-8")
+            return json.loads(body) if body else {}
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError) as exc:
+        return {"error": str(exc)}
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

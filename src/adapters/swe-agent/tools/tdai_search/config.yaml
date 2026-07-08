@@ -1,0 +1,25 @@
+tools:
+  tdai_memory_search:
+    signature: "tdai_memory_search <query> [<limit>]"
+    docstring: "Search TencentDB Agent Memory L1 structured memories through the TDAI Gateway."
+    arguments:
+      - name: query
+        type: string
+        description: "Search query for user preferences, prior fixes, project conventions, or remembered facts."
+        required: true
+      - name: limit
+        type: integer
+        description: "Maximum number of memories to return. Defaults to TDAI_MEMORY_SEARCH_LIMIT."
+        required: false
+  tdai_conversation_search:
+    signature: "tdai_conversation_search <query> [<limit>]"
+    docstring: "Search TencentDB Agent Memory L0 raw conversation logs through the TDAI Gateway."
+    arguments:
+      - name: query
+        type: string
+        description: "Search query for raw conversation evidence or prior detailed discussion."
+        required: true
+      - name: limit
+        type: integer
+        description: "Maximum number of conversation snippets to return. Defaults to TDAI_CONVERSATION_SEARCH_LIMIT."
+        required: false

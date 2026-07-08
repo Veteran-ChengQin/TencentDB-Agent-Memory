@@ -1,0 +1,43 @@
+# One-command launcher config for OpenHands + TencentDB Agent Memory.
+# Edit paths/env for your local installation, then run:
+#   python -m tdai_openhands.launcher --launcher-config path/to/this.yaml terminal
+
+tdai_config: "./tdai-longterm-only.yaml"
+log_dir: "../../../../.tdai-launcher/openhands"
+
+gateway:
+  auto_start: true
+  stop_on_exit: true
+  startup_timeout_seconds: 45
+  cwd: "../../../.."
+  command:
+    - "node"
+    - "--import"
+    - "tsx"
+    - "src/gateway/server.ts"
+  env:
+    # Keep API keys in the shell environment. Example:
+    #   export TDAI_LLM_API_KEY=...
+    TDAI_DATA_DIR: "~/.tdai/openhands-memory"
+    TDAI_LLM_MODEL: "deepseek-v4-flash"
+    TDAI_LLM_BASE_URL: "https://api.deepseek.com"
+
+seed:
+  enabled: true
+  builtin: "swe_bugfix"
+  session_key: "tdai-seed/software-engineering"
+  session_id: "tdai-seed-software-engineering"
+  delay_seconds: 20
+  session_end: true
+  items: []
+  # file: "/path/to/software-engineering-seeds.txt"
+
+openhands:
+  # Leave empty to auto-detect `openhands` or `openhands-cli` on PATH.
+  # If your install uses another entrypoint, set it explicitly, for example:
+  # command: ["python", "-m", "openhands.cli.main"]
+  command: []
+  cwd: "../../../.."
+  python_paths: []
+  pass_tdai_env: true
+  env: {}
