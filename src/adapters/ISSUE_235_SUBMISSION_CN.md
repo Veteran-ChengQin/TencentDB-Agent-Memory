@@ -139,4 +139,155 @@ SWE-agent adapter tests: 4 passed
 
 ## Clone 后 launcher 验证记录
 
-待在全新目录 clone fork 分支后补充。
+验证时间：2026-07-08。
+
+验证目录：
+
+```text
+D:\projects\llm4se\tencent\launcher-clone-test-20260708\TencentDB-Agent-Memory
+```
+
+### 1. Clone fork 分支
+
+```bash
+git clone \
+  --branch feat/openhands-swe-agent-tdai-adapters \
+  --single-branch \
+  git@github.com:Veteran-ChengQin/TencentDB-Agent-Memory.git \
+  D:\projects\llm4se\tencent\launcher-clone-test-20260708\TencentDB-Agent-Memory
+```
+
+确认：
+
+```text
+branch: feat/openhands-swe-agent-tdai-adapters
+commit: 1ae9e2f feat(adapters): add OpenHands and SWE-agent TDAI launchers
+```
+
+### 2. 前置环境
+
+本机已有：
+
+- Python + PyYAML + pytest。
+- 可访问的 TDAI Gateway：`http://127.0.0.1:8420/health` 返回 `status=ok`。
+
+本机未发现：
+
+- `openhands` / `openhands-cli` 命令不在 PATH。
+
+因此本次 clone 验证使用临时 OpenHands terminal stub 验证 launcher 能把控制权转交给平台入口。真实使用时，应将 `openhands.command` 配置为本机 OpenHands 启动命令。
+
+### 3. 验证 OpenHands launcher 入口
+
+```powershell
+$repo='D:\projects\llm4se\tencent\launcher-clone-test-20260708\TencentDB-Agent-Memory'
+$env:PYTHONPATH="$repo\src\adapters\openhands"
+python -m tdai_openhands.launcher --help
+```
+
+结果：成功输出 launcher help。
+
+### 4. 验证 SWE-agent launcher 入口
+
+```powershell
+$repo='D:\projects\llm4se\tencent\launcher-clone-test-20260708\TencentDB-Agent-Memory'
+$env:PYTHONPATH="$repo\src\adapters\swe-agent"
+python -m tdai_swe_agent.launcher --help
+```
+
+结果：成功输出 launcher help。
+
+### 5. 验证 seed 注入
+
+OpenHands seed：
+
+```powershell
+$repo='D:\projects\llm4se\tencent\launcher-clone-test-20260708\TencentDB-Agent-Memory'
+$env:PYTHONPATH="$repo\src\adapters\openhands"
+python -m tdai_openhands.launcher --launcher-config clone-test-openhands-launcher.yaml seed
+```
+
+结果：
+
+```text
+[tdai] Gateway ready: http://127.0.0.1:8420
+[tdai] Seeding 1 engineering memories into session_key='tdai-clone-test/openhands'
+[tdai] Seed 1/1 captured; l0_recorded=2
+[tdai] Seed session flushed with /session/end
+```
+
+SWE-agent seed：
+
+```powershell
+$repo='D:\projects\llm4se\tencent\launcher-clone-test-20260708\TencentDB-Agent-Memory'
+$env:PYTHONPATH="$repo\src\adapters\swe-agent"
+python -m tdai_swe_agent.launcher --launcher-config clone-test-sweagent-launcher.yaml seed
+```
+
+结果：
+
+```text
+[tdai] Gateway ready: http://127.0.0.1:8420
+[tdai] Seeding 1 engineering memories into session_key='tdai-clone-test/swe-agent'
+[tdai] Seed 1/1 captured; l0_recorded=2
+[tdai] Seed session flushed with /session/end
+```
+
+### 6. 验证 OpenHands terminal 入口转交
+
+临时测试配置中的 `openhands.command`：
+
+```yaml
+openhands:
+  command:
+    - "python"
+    - "-c"
+    - "print('OpenHands terminal entrypoint reached by TDAI launcher')"
+```
+
+执行：
+
+```powershell
+$repo='D:\projects\llm4se\tencent\launcher-clone-test-20260708\TencentDB-Agent-Memory'
+$env:PYTHONPATH="$repo\src\adapters\openhands"
+python -m tdai_openhands.launcher --launcher-config clone-test-openhands-launcher.yaml terminal
+```
+
+结果：
+
+```text
+OpenHands terminal entrypoint reached by TDAI launcher
+[tdai] Gateway ready: http://127.0.0.1:8420
+[tdai] Seeding 1 engineering memories into session_key='tdai-clone-test/openhands'
+[tdai] Seed 1/1 captured; l0_recorded=2
+[tdai] Seed session flushed with /session/end
+[tdai] Launching OpenHands terminal: python -c print('OpenHands terminal entrypoint reached by TDAI launcher')
+```
+
+说明：输出顺序受 subprocess/stdout 缓冲影响，但 launcher 已完成 Gateway 检查、seed 注入和平台入口转交。
+
+### 7. Clone 后测试
+
+```powershell
+$repo='D:\projects\llm4se\tencent\launcher-clone-test-20260708\TencentDB-Agent-Memory'
+$env:PYTHONPATH="$repo\src\adapters\openhands"
+python -m pytest src\adapters\openhands\tests -q
+```
+
+结果：
+
+```text
+14 passed
+```
+
+```powershell
+$repo='D:\projects\llm4se\tencent\launcher-clone-test-20260708\TencentDB-Agent-Memory'
+$env:PYTHONPATH="$repo\src\adapters\swe-agent"
+python -m pytest src\adapters\swe-agent\tests -q
+```
+
+结果：
+
+```text
+4 passed
+```
