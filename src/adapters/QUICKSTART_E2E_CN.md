@@ -295,81 +295,48 @@ OpenHands recall / capture 示例会引用：
 $ROOT/runs/pylint-4551/problem_statement.txt
 ```
 
-因此需要先从 SWE-bench Verified 数据集中取出 `pylint-dev__pylint-4551` 的 issue 描述。
+为了让 quick start 不依赖 Hugging Face 下载，仓库已经提供了一个可直接复制的示例：
 
-建议用一个独立的小环境准备数据，避免污染 OpenHands / SWE-agent 环境：
-
-```bash
-python3.12 -m venv "$ROOT/.venv-swebench-data"
-source "$ROOT/.venv-swebench-data/bin/activate"
-python -m pip install --upgrade pip
-python -m pip install datasets
+```text
+src/adapters/examples/swebench/pylint-dev__pylint-4551/
 ```
 
-如果 Hugging Face 下载较慢或出现未认证限流提示，可以设置自己的 token：
-
-```bash
-export HF_TOKEN="<optional-huggingface-token>"
-```
-
-写出 instance 文件：
+复制到 run 目录：
 
 ```bash
 mkdir -p "$ROOT/runs/pylint-4551/tdai"
-
-python - <<'PY'
-import json
-import os
-from pathlib import Path
-
-from datasets import load_dataset
-
-root = Path(os.environ["ROOT"])
-instance_id = "pylint-dev__pylint-4551"
-out_dir = root / "runs" / "pylint-4551"
-out_dir.mkdir(parents=True, exist_ok=True)
-
-dataset = load_dataset("princeton-nlp/SWE-bench_Verified", split="test")
-item = next(row for row in dataset if row["instance_id"] == instance_id)
-
-(out_dir / "instance.json").write_text(
-    json.dumps(dict(item), ensure_ascii=False, indent=2),
-    encoding="utf-8",
-)
-(out_dir / "problem_statement.txt").write_text(
-    item["problem_statement"].strip() + "\n",
-    encoding="utf-8",
-)
-(out_dir / "metadata.json").write_text(
-    json.dumps(
-        {
-            "instance_id": item["instance_id"],
-            "repo": item["repo"],
-            "base_commit": item["base_commit"],
-            "version": item.get("version"),
-            "dataset": "princeton-nlp/SWE-bench_Verified",
-            "split": "test",
-        },
-        ensure_ascii=False,
-        indent=2,
-    ),
-    encoding="utf-8",
-)
-
-print(out_dir / "problem_statement.txt")
-print("repo:", item["repo"])
-print("base_commit:", item["base_commit"])
-PY
+cp \
+  "$ROOT/TencentDB-Agent-Memory/src/adapters/examples/swebench/pylint-dev__pylint-4551/problem_statement.txt" \
+  "$ROOT/runs/pylint-4551/problem_statement.txt"
+cp \
+  "$ROOT/TencentDB-Agent-Memory/src/adapters/examples/swebench/pylint-dev__pylint-4551/metadata.json" \
+  "$ROOT/runs/pylint-4551/metadata.json"
 ```
 
-确认：
+确认内容：
 
 ```bash
 sed -n '1,80p' "$ROOT/runs/pylint-4551/problem_statement.txt"
 cat "$ROOT/runs/pylint-4551/metadata.json"
 ```
 
-如果你已经有自己的 SWE-bench instance JSON，也可以直接写出同名文件；后续命令只要求 `problem_statement.txt` 存在，并且 `repo/base_commit/instance_id` 与实际任务一致。
+示例 metadata 中固定了：
+
+```text
+instance_id: pylint-dev__pylint-4551
+repo: pylint-dev/pylint
+base_commit: 99589b08de8c5a2c6cc61e13a37420a868c80599
+testbed_image: swebench/sweb.eval.x86_64.pylint-dev_1776_pylint-4551:latest
+```
+
+如果你要换成其他 SWE-bench instance，只需要提供同样两个文件：
+
+```text
+problem_statement.txt
+metadata.json
+```
+
+并保证 `metadata.json` 中的 `instance_id`、`repo`、`base_commit` 和实际任务一致。
 
 ## 10. WSL 原生启动 OpenHands
 
