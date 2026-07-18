@@ -62,21 +62,24 @@ sequenceDiagram
   participant User
   participant Launcher as tdai_openhands.launcher
   participant Gateway as TDAI Gateway
-  participant Runner as tdai_openhands.runner
+  participant Hooks as OpenHands lifecycle hooks
   participant OH as OpenHands
 
-  User->>Launcher: terminal / seed
+  User->>Launcher: tui / seed
   Launcher->>Gateway: GET /health
   opt seed enabled
     Launcher->>Gateway: POST /capture with engineering seed
     Launcher->>Gateway: POST /session/end
   end
-  Launcher->>OH: launch configured terminal command
-  Runner->>Gateway: POST /recall
-  Runner->>Gateway: POST /search/memories
-  Runner->>OH: inject <tdai_recall_context>
-  OH-->>Runner: exported events / trajectory / patch
-  Runner->>Gateway: POST /capture
+  Launcher->>OH: install hooks + MCP and launch TUI
+  User->>OH: submit prompt
+  OH->>Hooks: UserPromptSubmit
+  Hooks->>Gateway: POST /recall + /search/memories
+  Hooks-->>OH: additionalContext
+  OH->>Hooks: Stop
+  Hooks->>Gateway: POST /capture from native events
+  OH->>Hooks: SessionEnd
+  Hooks->>Gateway: drain events + POST /session/end
 ```
 
 The OpenHands adapter can be used in three modes:
@@ -85,7 +88,9 @@ The OpenHands adapter can be used in three modes:
 - `prepare-request`: inject recall into an OpenHands app-server start request JSON.
 - `capture`: capture exported OpenHands artifacts after a run.
 
-The launcher adds a convenience path for local users: Gateway check/start, seed injection, and OpenHands terminal entrypoint execution.
+The launcher adds a native TUI path: Gateway check/start, seed injection,
+idempotent hooks/MCP installation, and OpenHands TUI execution. The explicit
+runner modes remain available for headless or app-server workflows.
 
 ## SWE-agent Data Flow
 
@@ -134,6 +139,7 @@ For these platforms, the stable integration boundary is the TDAI Gateway:
 
 ```text
 src/adapters/openhands/
+  requirements.txt
   configs/
     tdai-longterm-only.yaml
     tdai-openhands-launcher.yaml
@@ -143,6 +149,15 @@ src/adapters/openhands/
     runner.py
     launcher.py
     capture.py
+    hook_entry.py
+    native_events.py
+    install.py
+    mcp_server.py
+  plugin/
+    .plugin/plugin.json
+    hooks/hooks.json
+    .mcp.json
+    skills/tdai-memory/SKILL.md
   tools/tdai_search/
     tdai_mcp_server.py
   tests/
@@ -173,7 +188,7 @@ export PYTHONPATH="$PWD/src/adapters/openhands:$PYTHONPATH"
 export TDAI_LLM_API_KEY="..."
 python -m tdai_openhands.launcher \
   --launcher-config src/adapters/openhands/configs/tdai-openhands-launcher.yaml \
-  terminal
+  tui
 ```
 
 SWE-agent:
@@ -186,14 +201,14 @@ python -m tdai_swe_agent.launcher \
   run
 ```
 
-Both launchers support a `seed` command for engineering-memory injection without starting the host platform.
+Both launchers support a `seed` command for engineering-memory injection without starting the host platform. The OpenHands launcher also supports `install` to materialize hooks and MCP configuration without starting the TUI.
 
 ## Verification
 
 Local adapter tests:
 
 ```text
-OpenHands adapter tests: 14 passed
+OpenHands adapter tests: 22 passed
 SWE-agent adapter tests: 4 passed
 ```
 
@@ -202,7 +217,10 @@ Clone-based launcher validation:
 - Cloned branch `feat/openhands-swe-agent-tdai-adapters` from `Veteran-ChengQin/TencentDB-Agent-Memory`.
 - Confirmed launcher `--help` works for both adapters.
 - Confirmed seed injection writes L0 records and calls `/session/end`.
-- Confirmed OpenHands launcher can transfer control to the configured terminal entrypoint.
+- Installed OpenHands CLI 1.16.0 in WSL with the official `uv tool` path.
+- Confirmed the OpenHands SDK loads all four installed lifecycle hooks.
+- Confirmed `openhands mcp list` reports `tdai_search` as enabled.
+- Confirmed the MCP server module initializes and exposes the TDAI server.
 - Re-ran adapter tests from the cloned checkout.
 
 Detailed clone validation commands are recorded in `src/adapters/ISSUE_235_SUBMISSION_CN.md`.

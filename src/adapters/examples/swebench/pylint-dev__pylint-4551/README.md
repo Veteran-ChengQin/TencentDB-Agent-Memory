@@ -1,7 +1,7 @@
 # SWE-bench Example: pylint-dev__pylint-4551
 
 This directory contains a small, checked-in SWE-bench Verified example used by
-the OpenHands and SWE-agent TDAI adapter quick start.
+the OpenHands TDAI adapter quick start.
 
 Files:
 

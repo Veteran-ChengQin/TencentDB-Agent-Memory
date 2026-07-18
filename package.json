@@ -47,8 +47,6 @@
     "hermes-plugin/",
     "!src/adapters/openhands/tests/",
     "!src/adapters/openhands/tests/**",
-    "!src/adapters/swe-agent/tests/",
-    "!src/adapters/swe-agent/tests/**",
     "!src/adapters/**/.pytest_cache/",
     "!src/adapters/**/.pytest_cache/**",
     "!src/adapters/**/__pycache__/",

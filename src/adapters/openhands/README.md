@@ -1,153 +1,94 @@
-# TDAI Adapter for OpenHands
+# TencentDB Agent Memory for OpenHands CLI
 
-This directory contains an OpenHands adapter for TencentDB Agent Memory.
+This directory provides the maintained OpenHands integration for TencentDB
+Agent Memory (TDAI). It adds platform-specific adapter code without modifying
+OpenHands or TDAI core behavior.
 
-The adapter follows the rule used for the SWE-agent integration: it is platform
-adapter code, not a patch to OpenHands core logic.
+## Supported Runtime Path
 
-## What It Does
+The integration targets the standalone OpenHands CLI/TUI:
 
-- Calls the TDAI Gateway `/recall` endpoint before an OpenHands task starts.
-- Calls `/search/memories` from the adapter side to include L1 memories without
-  changing the legacy `/recall.context` Gateway semantics.
-- Produces a `<tdai_recall_context>` block that can be injected into an
-  OpenHands initial message or start request JSON.
-- Captures exported OpenHands events, trajectories, metadata, and patches
-  through `/capture` after a run finishes.
-- Optionally exposes active memory search through an MCP server.
+- `UserPromptSubmit` recalls L1/L2/L3 memory and adds it to the next model turn.
+- `Stop` captures the completed OpenHands turn into TDAI L0.
+- `SessionEnd` captures remaining events and flushes memory extraction.
+- MCP exposes `tdai_memory_search` and `tdai_conversation_search` for explicit,
+  model-initiated search.
+- The launcher starts the Gateway, merges hooks/MCP configuration, optionally
+  seeds engineering memories, and starts the real `openhands` TUI.
+
+Automatic recall/capture does not depend on the model choosing to call an MCP
+tool. The adapter does not replace OpenHands context management or compaction.
 
 ## Layout
 
-- `tdai_openhands/`: Python adapter package.
-- `configs/tdai-longterm-only.yaml`: reference configuration.
-- `configs/tdai-openhands-launcher.yaml`: one-command launcher configuration.
-- `tools/tdai_search/`: optional MCP memory search tool.
-- `tests/`: adapter unit tests.
-- `run_with_tdai.py`: small CLI entrypoint.
+- `tdai_openhands/`: launcher, lifecycle hooks, Gateway client, and MCP server.
+- `configs/tdai-longterm-only.yaml`: TDAI hook/recall/capture configuration.
+- `configs/tdai-openhands-launcher.yaml`: Linux launcher configuration.
+- `tools/tdai_search/`: MCP wrapper entry point.
+- `tests/`: active adapter tests.
+- `run_hook.py`: stable command entry point written into OpenHands hooks.
 
-## One-Command Launcher
+Legacy App Server request injection, offline trajectory capture, the plugin
+draft, and the SWE-agent adapter are archived under the repository `dustbin/`.
+They are not supported entry points.
 
-For the common local workflow, edit:
+## Quick Start
 
-```text
-configs/tdai-openhands-launcher.yaml
-```
-
-Then run:
+Follow the Chinese Linux guide at
+[`../QUICKSTART_E2E_CN.md`](../QUICKSTART_E2E_CN.md). The essential launch is:
 
 ```bash
-export PYTHONPATH="/path/to/TencentDB-Agent-Memory/src/adapters/openhands:$PYTHONPATH"
-export TDAI_LLM_API_KEY="..."
+source "$HOME/.venvs/tdai-openhands-adapter/bin/activate"
+export PYTHONPATH="$PWD/src/adapters/openhands${PYTHONPATH:+:$PYTHONPATH}"
+
 python -m tdai_openhands.launcher \
-  --launcher-config /path/to/TencentDB-Agent-Memory/src/adapters/openhands/configs/tdai-openhands-launcher.yaml \
-  terminal
+  --launcher-config src/adapters/openhands/configs/tdai-openhands-launcher.yaml \
+  tui
 ```
 
-The launcher checks or starts the TDAI Gateway, injects configured software
-engineering seed memories, and then enters the OpenHands terminal command. Set
-`openhands.command` in the launcher config when your OpenHands installation does
-not expose `openhands` or `openhands-cli` on `PATH`.
+The launcher config uses these persistent locations by default:
 
-To seed memories only:
+- OpenHands conversations/config: `~/.openhands-tdai`
+- TDAI memory: `~/.tdai/openhands-memory`
+- Hook state: `~/.tdai/openhands-hook-state`
+- OpenHands workspace: `~/openhands-tdai-workspace`
+
+Keep those locations unchanged when resuming a conversation:
 
 ```bash
 python -m tdai_openhands.launcher \
-  --launcher-config /path/to/TencentDB-Agent-Memory/src/adapters/openhands/configs/tdai-openhands-launcher.yaml \
-  seed
+  --launcher-config src/adapters/openhands/configs/tdai-openhands-launcher.yaml \
+  --skip-seed \
+  tui -- --resume <conversation-id>
 ```
 
-## Recall Only
+## Configuration Boundaries
 
-Start the TDAI Gateway first:
+Provider secrets belong in shell environment variables, not YAML:
 
 ```bash
-node --import tsx src/gateway/server.ts
+export TDAI_LLM_MODEL="<tdai-model>"
+export TDAI_LLM_BASE_URL="<openai-compatible-base-url>"
+export TDAI_LLM_API_KEY="<api-key>"
+
+export LLM_MODEL="<litellm-provider>/<openhands-model>"
+export LLM_BASE_URL="<openai-compatible-base-url>"
+export LLM_API_KEY="<api-key>"
 ```
 
-Then make the adapter importable:
+`TDAI_LLM_*` configures memory extraction. `LLM_*` configures the OpenHands
+agent. `--override-with-envs` is included in the reference launcher command so
+OpenHands applies the exported `LLM_*` values.
+
+## Verification
+
+Run the active Python tests from the repository root:
 
 ```bash
-export PYTHONPATH="/path/to/TencentDB-Agent-Memory/src/adapters/openhands:$PYTHONPATH"
+PYTHONPATH="$PWD/src/adapters/openhands" \
+  python -m pytest -q src/adapters/openhands/tests
 ```
 
-Generate a recall block:
-
-This command does **not** start OpenHands. It only talks to the TDAI Gateway and
-writes a recall context block that your OpenHands runner, App Server request, or
-manual task prompt can consume.
-
-```bash
-python -m tdai_openhands.runner \
-  --tdai-config /path/to/TencentDB-Agent-Memory/src/adapters/openhands/configs/tdai-longterm-only.yaml \
-  recall \
-  --instance-id pylint-dev__pylint-4551 \
-  --repo pylint-dev/pylint \
-  --base-commit <base_commit> \
-  --problem-file /path/to/problem_statement.txt \
-  --tdai-run-id openhands-tdai-smoke \
-  --text-only \
-  --output /tmp/tdai_recall_context.txt
-```
-
-## Prepare an OpenHands Start Request
-
-If you start OpenHands through the App Server API, prepare the request JSON
-without modifying OpenHands:
-
-```bash
-python -m tdai_openhands.runner \
-  --tdai-config /path/to/config.yaml \
-  prepare-request \
-  --request-file /tmp/openhands_start_request.json \
-  --instance-id pylint-dev__pylint-4551 \
-  --repo pylint-dev/pylint \
-  --problem-file /tmp/problem_statement.txt \
-  --tdai-run-id openhands-tdai-smoke \
-  --output /tmp/openhands_start_request.tdai.json
-```
-
-The output contains:
-
-- `request`: the OpenHands request with TDAI context injected into
-  `initial_message`.
-- `tdai`: session key, session id, run id, and recall payload metadata.
-
-## Capture an OpenHands Run
-
-After OpenHands finishes, capture exported events/trajectory/patch:
-
-```bash
-python -m tdai_openhands.runner \
-  --tdai-config /path/to/config.yaml \
-  capture \
-  --instance-id pylint-dev__pylint-4551 \
-  --repo pylint-dev/pylint \
-  --base-commit <base_commit> \
-  --problem-file /tmp/problem_statement.txt \
-  --events-file /tmp/openhands_events.json \
-  --trajectory-file /tmp/openhands_trajectory.json \
-  --patch-file /tmp/patch.diff \
-  --tdai-run-id openhands-tdai-smoke \
-  --output /tmp/tdai_capture_response.json
-```
-
-`--events-file` may be repeated. It accepts JSON, JSONL, or an OpenHands
-conversation export zip when the archive contains event/trajectory/history JSON
-files.
-
-## Optional Active Search Tool
-
-The `tools/tdai_search/tdai_mcp_server.py` file exposes:
-
-- `tdai_memory_search`
-- `tdai_conversation_search`
-
-Register it with OpenHands as a custom MCP server when active in-run memory
-search is needed. Keep it disabled for recall-only experiments.
-
-## Design Boundaries
-
-- Does not modify OpenHands source code.
-- Does not modify TDAI core recall/capture/search behavior.
-- Does not change the Gateway `/recall.context` response semantics.
-- Does not take over OpenHands context management or compaction.
+The launcher merges existing OpenHands hook and MCP files and keeps one-time
+`.bak` backups. Hook failures are fail-open so a Gateway outage does not block
+the OpenHands task.

@@ -1,9 +1,15 @@
-# One-command launcher config for OpenHands + TencentDB Agent Memory.
-# Edit paths/env for your local installation, then run:
-#   python -m tdai_openhands.launcher --launcher-config path/to/this.yaml terminal
+# Linux one-command launcher config for OpenHands CLI + TencentDB Agent Memory.
+# Export model credentials in the shell, then run:
+#   python -m tdai_openhands.launcher --launcher-config path/to/this.yaml tui
 
 tdai_config: "./tdai-longterm-only.yaml"
-log_dir: "../../../../.tdai-launcher/openhands"
+log_dir: "~/.tdai/openhands-launcher/logs"
+
+integration:
+  install_on_launch: true
+  openhands_home: "~/.openhands-tdai"
+  # Project hooks travel with the workspace and take precedence in OpenHands.
+  hooks_scope: "project"
 
 gateway:
   auto_start: true
@@ -16,29 +22,30 @@ gateway:
     - "tsx"
     - "src/gateway/server.ts"
   env:
-    # Keep API keys in the shell environment. Example:
-    #   export TDAI_LLM_API_KEY=...
+    # Keep TDAI_LLM_MODEL, TDAI_LLM_BASE_URL and TDAI_LLM_API_KEY in
+    # the shell environment. Never commit provider credentials here.
     TDAI_DATA_DIR: "~/.tdai/openhands-memory"
-    TDAI_LLM_MODEL: "deepseek-v4-flash"
-    TDAI_LLM_BASE_URL: "https://api.deepseek.com"
 
 seed:
-  enabled: true
+  # Enable this for the first engineering-memory demonstration, or run the
+  # launcher with the explicit `seed` command after setting enabled: true.
+  enabled: false
   builtin: "swe_bugfix"
   session_key: "tdai-seed/software-engineering"
   session_id: "tdai-seed-software-engineering"
-  delay_seconds: 20
+  delay_seconds: 2
   session_end: true
   post_session_end_wait_seconds: 0
   items: []
   # file: "/path/to/software-engineering-seeds.txt"
 
 openhands:
-  # Leave empty to auto-detect `openhands` or `openhands-cli` on PATH.
-  # If your install uses another entrypoint, set it explicitly, for example:
-  # command: ["python", "-m", "openhands.cli.main"]
-  command: []
-  cwd: "../../../.."
+  command: ["openhands", "--override-with-envs"]
+  # This is both the TUI working directory and the project hooks scope.
+  cwd: "~/openhands-tdai-workspace"
   python_paths: []
   pass_tdai_env: true
-  env: {}
+  env:
+    # Keep this aligned with integration.openhands_home so --resume can find
+    # conversations created by earlier launcher runs.
+    OPENHANDS_PERSISTENCE_DIR: "~/.openhands-tdai"

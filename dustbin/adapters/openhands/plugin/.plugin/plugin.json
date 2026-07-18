@@ -1,0 +1,10 @@
+{
+  "name": "tencentdb-agent-memory",
+  "version": "0.1.0",
+  "description": "Long-term memory recall, capture, and active search for OpenHands",
+  "author": {
+    "name": "TencentDB Agent Memory Contributors"
+  },
+  "license": "MIT",
+  "repository": "https://github.com/TencentCloud/TencentDB-Agent-Memory"
+}

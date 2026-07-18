@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "tdai_search": {
+      "command": "python",
+      "args": [
+        "-m",
+        "tdai_openhands.mcp_server"
+      ],
+      "env": {
+        "TDAI_GATEWAY_URL": "${TDAI_GATEWAY_URL}",
+        "TDAI_GATEWAY_API_KEY_ENV": "${TDAI_GATEWAY_API_KEY_ENV}"
+      }
+    }
+  }
+}

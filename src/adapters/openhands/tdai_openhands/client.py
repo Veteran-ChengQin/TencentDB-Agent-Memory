@@ -6,7 +6,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Any
 
-from .config import GatewayConfig, OpenHandsApiConfig
+from .config import GatewayConfig
 
 
 @dataclass
@@ -104,6 +104,7 @@ class TdaiGatewayClient:
         session_id: str | None = None,
         user_id: str | None = None,
         messages: list[Any] | None = None,
+        started_at: int | None = None,
     ) -> CaptureResult:
         payload: dict[str, Any] = {
             "user_content": user_content,
@@ -116,6 +117,8 @@ class TdaiGatewayClient:
             payload["user_id"] = user_id
         if messages is not None:
             payload["messages"] = messages
+        if started_at is not None:
+            payload["started_at"] = started_at
         data = self._request("POST", "/capture", payload)
         return CaptureResult(
             l0_recorded=int(data.get("l0_recorded") or 0),
@@ -127,9 +130,21 @@ class TdaiGatewayClient:
         payload: dict[str, Any] = {"session_key": session_key}
         if user_id:
             payload["user_id"] = user_id
-        return self._request("POST", "/session/end", payload)
+        return self._request(
+            "POST",
+            "/session/end",
+            payload,
+            timeout_seconds=self.config.session_end_timeout_seconds,
+        )
 
-    def _request(self, method: str, path: str, payload: dict[str, Any] | None) -> dict[str, Any]:
+    def _request(
+        self,
+        method: str,
+        path: str,
+        payload: dict[str, Any] | None,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> dict[str, Any]:
         url = f"{self.base_url}{path}"
         headers = {"Accept": "application/json"}
         body: bytes | None = None
@@ -141,55 +156,17 @@ class TdaiGatewayClient:
             headers["Authorization"] = f"Bearer {api_key}"
         request = urllib.request.Request(url, data=body, headers=headers, method=method)
         try:
-            with urllib.request.urlopen(request, timeout=self.config.timeout_seconds) as response:
+            with urllib.request.urlopen(
+                request,
+                timeout=(
+                    self.config.timeout_seconds
+                    if timeout_seconds is None
+                    else timeout_seconds
+                ),
+            ) as response:
                 text = response.read().decode("utf-8")
                 return json.loads(text) if text else {}
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError) as exc:
             if self.config.fail_open:
                 return {"_tdai_error": str(exc)}
             raise
-
-
-class OpenHandsApiClient:
-    """Small optional client for OpenHands App Server REST APIs.
-
-    The adapter does not depend on OpenHands internals. This client is only used
-    when callers want to patch request JSON or fetch an exported trajectory over
-    HTTP instead of using files.
-    """
-
-    def __init__(self, config: OpenHandsApiConfig) -> None:
-        if not config.app_server_url:
-            raise ValueError("openhands.app_server_url is required")
-        self.config = config
-        self.base_url = config.app_server_url.rstrip("/")
-
-    def start_conversation(self, request_payload: dict[str, Any]) -> dict[str, Any]:
-        return self._request("POST", "/api/conversations", request_payload)
-
-    def download_conversation(self, conversation_id: str) -> bytes:
-        return self._request_bytes("GET", f"/api/conversations/{conversation_id}/download", None)
-
-    def _request(self, method: str, path: str, payload: dict[str, Any] | None) -> dict[str, Any]:
-        data = self._request_bytes(method, path, payload)
-        text = data.decode("utf-8")
-        return json.loads(text) if text else {}
-
-    def _request_bytes(self, method: str, path: str, payload: dict[str, Any] | None) -> bytes:
-        headers = {"Accept": "application/json"}
-        body: bytes | None = None
-        if payload is not None:
-            body = json.dumps(payload).encode("utf-8")
-            headers["Content-Type"] = "application/json"
-        api_key = self.config.resolved_session_api_key()
-        if api_key:
-            headers["X-Session-API-Key"] = api_key
-            headers["Authorization"] = f"Bearer {api_key}"
-        request = urllib.request.Request(
-            f"{self.base_url}{path}",
-            data=body,
-            headers=headers,
-            method=method,
-        )
-        with urllib.request.urlopen(request, timeout=self.config.timeout_seconds) as response:
-            return response.read()

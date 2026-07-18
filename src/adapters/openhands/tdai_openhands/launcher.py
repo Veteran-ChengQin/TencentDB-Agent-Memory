@@ -13,6 +13,7 @@ from typing import Any
 
 from .client import TdaiGatewayClient
 from .config import TdaiOpenHandsConfig, load_config
+from .install import install_integration
 
 
 BUILTIN_SWEBENCH_SEEDS = [
@@ -34,7 +35,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tdai-config", help="Override the TDAI OpenHands adapter config path.")
     parser.add_argument("--skip-gateway", action="store_true", help="Do not check or auto-start the TDAI Gateway.")
     parser.add_argument("--skip-seed", action="store_true", help="Skip seed memory injection.")
-    parser.add_argument("command", nargs="?", choices=("terminal", "seed"), default="terminal")
+    parser.add_argument(
+        "command",
+        nargs="?",
+        choices=("tui", "terminal", "install", "seed"),
+        default="tui",
+    )
     parser.add_argument("openhands_args", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
 
@@ -43,9 +49,28 @@ def main(argv: list[str] | None = None) -> int:
     base_dir = launcher_path.parent
 
     tdai_config_path = args.tdai_config or launcher.get("tdai_config")
-    tdai_config = load_config(_resolve_path(tdai_config_path, base_dir) if tdai_config_path else None)
+    resolved_tdai_config = (
+        _resolve_path(tdai_config_path, base_dir) if tdai_config_path else None
+    )
+    tdai_config = load_config(resolved_tdai_config)
     log_dir = _resolve_path(launcher.get("log_dir", ".tdai-launcher/openhands"), base_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
+
+    openhands_config = launcher.get("openhands", {})
+    integration_config = launcher.get("integration", {})
+    if args.command == "install" or bool(integration_config.get("install_on_launch", True)):
+        result = _install_openhands_integration(
+            integration_config,
+            openhands_config,
+            tdai_config,
+            resolved_tdai_config,
+            base_dir,
+        )
+        print(f"[tdai] OpenHands hooks ready: {result.hooks_path}")
+        if result.mcp_path:
+            print(f"[tdai] OpenHands MCP ready: {result.mcp_path}")
+        if args.command == "install":
+            return 0
 
     gateway_process: subprocess.Popen[str] | None = None
     try:
@@ -57,7 +82,13 @@ def main(argv: list[str] | None = None) -> int:
         if not args.skip_seed:
             _seed_gateway(tdai_config, launcher.get("seed", {}), base_dir, log_dir)
         extra_args = _strip_remainder_separator(args.openhands_args)
-        return _run_openhands_terminal(launcher.get("openhands", {}), tdai_config, base_dir, extra_args)
+        return _run_openhands_terminal(
+            openhands_config,
+            tdai_config,
+            resolved_tdai_config,
+            base_dir,
+            extra_args,
+        )
     finally:
         if gateway_process is not None and launcher.get("gateway", {}).get("stop_on_exit", True):
             gateway_process.terminate()
@@ -169,6 +200,7 @@ def _seed_gateway(
 def _run_openhands_terminal(
     openhands_config: dict[str, Any],
     tdai_config: TdaiOpenHandsConfig,
+    tdai_config_path: Path | None,
     base_dir: Path,
     extra_args: list[str],
 ) -> int:
@@ -184,8 +216,30 @@ def _run_openhands_terminal(
     if bool(openhands_config.get("pass_tdai_env", True)):
         env["TDAI_GATEWAY_URL"] = tdai_config.gateway.url
         env["TDAI_GATEWAY_API_KEY_ENV"] = tdai_config.gateway.api_key_env
-    print(f"[tdai] Launching OpenHands terminal: {' '.join(command)}")
+        if tdai_config_path is not None:
+            env["TDAI_OPENHANDS_CONFIG"] = str(tdai_config_path)
+    print(f"[tdai] Launching OpenHands TUI: {' '.join(command)}")
     return subprocess.call(command, cwd=str(cwd), env=env)
+
+
+def _install_openhands_integration(
+    integration_config: dict[str, Any],
+    openhands_config: dict[str, Any],
+    tdai_config: TdaiOpenHandsConfig,
+    tdai_config_path: Path | None,
+    base_dir: Path,
+):
+    project_dir = _resolve_path(openhands_config.get("cwd", "."), base_dir)
+    openhands_home = integration_config.get("openhands_home")
+    return install_integration(
+        tdai_config,
+        config_path=tdai_config_path,
+        openhands_home=(
+            _resolve_path(openhands_home, base_dir) if openhands_home else None
+        ),
+        project_dir=project_dir,
+        hooks_scope=str(integration_config.get("hooks_scope") or "auto"),
+    )
 
 
 def _discover_openhands_command() -> list[str]:

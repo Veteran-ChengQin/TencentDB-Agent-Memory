@@ -8,9 +8,6 @@
  *   adapters/
  *   - openclaw/      OpenClaw plugin host (in-process, runEmbeddedPiAgent)
  *   - standalone/    Gateway / Hermes sidecar (HTTP, OpenAI-compatible API)
- *   - swe-agent/     Python integration for SWE-agent. This is packaged as an
- *                    external adapter resource and is not exported from this
- *                    TypeScript barrel.
  *   - openhands/     Python integration for OpenHands. This is packaged as an
  *                    external adapter resource and is not exported from this
  *                    TypeScript barrel.
