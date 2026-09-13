@@ -535,6 +535,60 @@ paths:
         default:
           $ref: '#/components/responses/ErrorResponse'
 
+  /code-graph/task-diff/build:
+    post:
+      tags: [Code-Graph]
+      summary: Build a Task-specific code graph delta
+      description: Records Task provenance without mutating the shared project graph.
+      operationId: buildTaskCodeGraphDiff
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskCodeGraphDiffBuildRequest'
+      responses:
+        '200':
+          description: Delta created or replaced
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+
+  /code-graph/task-diff/get:
+    post:
+      tags: [Code-Graph]
+      summary: Get and reconcile a Task-specific code graph delta
+      operationId: getTaskCodeGraphDiff
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskCodeGraphDiffGetRequest'
+      responses:
+        '200':
+          description: Success
+        '404':
+          description: Delta not found
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+
+  /code-graph/task-diff/status:
+    post:
+      tags: [Code-Graph]
+      summary: Update Task delta lifecycle status
+      operationId: updateTaskCodeGraphDiffStatus
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskCodeGraphDiffStatusRequest'
+      responses:
+        '200':
+          description: Success
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+
   /code-graph/delete:
     post:
       tags: [Code-Graph]
@@ -1100,6 +1154,51 @@ components:
       properties:
         code_graph_id:
           type: string
+
+    TaskCodeGraphDiffGetRequest:
+      type: object
+      required: [task_id, code_graph_id]
+      properties:
+        task_id:
+          type: string
+        code_graph_id:
+          type: string
+
+    TaskCodeGraphDiffBuildRequest:
+      allOf:
+        - $ref: '#/components/schemas/TaskCodeGraphDiffGetRequest'
+        - type: object
+          required: [team_id, base_commit, patch]
+          properties:
+            team_id:
+              type: string
+            base_commit:
+              type: string
+            result_commit:
+              type: string
+            result_snapshot:
+              type: string
+            patch:
+              type: string
+              description: Unified diff; does not need to be committed yet.
+            before_files:
+              type: object
+              additionalProperties:
+                type: string
+            after_files:
+              type: object
+              additionalProperties:
+                type: string
+
+    TaskCodeGraphDiffStatusRequest:
+      allOf:
+        - $ref: '#/components/schemas/TaskCodeGraphDiffGetRequest'
+        - type: object
+          required: [status]
+          properties:
+            status:
+              type: string
+              enum: [candidate, merged, obsolete]
 
     CodeGraphDeleteRequest:
       type: object

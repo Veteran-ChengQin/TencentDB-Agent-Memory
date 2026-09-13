@@ -13,13 +13,15 @@
  */
 
 import { Hono } from "hono";
+import { simpleGit } from "simple-git";
 
-import type { CodeGraphService } from "../store/index.js";
+import type { CodeGraphService, TaskCodeGraphChangeService, TaskCodeGraphChangeStatus } from "../store/index.js";
 import type { SyncStatus } from "../store/index.js";
 import { executeTool as executeCodeTool } from "../engines/code/index.js";
 import { toCodeGraphToolName, CODEGRAPH_QUERY_TOOL_NAMES } from "./tools.js";
 import {
   extractIdFields,
+  extractServiceId,
   isValidIdSegment,
   wrapOk,
   wrapError,
@@ -30,6 +32,7 @@ import type { CodeGraphInstancePool } from "../module.js";
 
 export interface CodeGraphRouteDeps {
   cgService: CodeGraphService;
+  taskCodeGraphChangeService: TaskCodeGraphChangeService;
   instancePool: CodeGraphInstancePool;
   /** Public base URL for service_url; should already include the API prefix (e.g. http://host:8421/v3). */
   publicBaseUrl: string;
@@ -175,7 +178,7 @@ function buildToolParams(
 
 export function createCodeGraphRoutes(deps: CodeGraphRouteDeps): Hono {
   const app = new Hono();
-  const { cgService, instancePool, publicBaseUrl } = deps;
+  const { cgService, taskCodeGraphChangeService, instancePool, publicBaseUrl } = deps;
 
   // ═══════════════════ Management ═══════════════════
 
@@ -282,6 +285,123 @@ export function createCodeGraphRoutes(deps: CodeGraphRouteDeps): Hono {
     return c.json(wrapOk({ code_graph_id: result.row.code_graph_id, status: result.row.status }), 202);
   });
 
+  /**
+   * Build and persist the Task-specific delta. This does not mutate or sync the
+   * shared project graph; callers may safely invoke it before a PR is merged.
+   */
+  app.post("/task-diff/build", async (c) => {
+    const body = await c.req.json<Record<string, unknown>>();
+    const serviceId = extractServiceId(c.req.header("x-tdai-service-id"));
+    if (!serviceId) return c.json(wrapError(400, "x-tdai-service-id header is required"), 400);
+    const cgId = body.code_graph_id;
+    const taskId = body.task_id;
+    const baseCommit = body.base_commit;
+    const patch = body.patch;
+    if (!isValidIdSegment(cgId)) return c.json(wrapError(400, "code_graph_id is required"), 400);
+    if (!isValidIdSegment(taskId)) return c.json(wrapError(400, "task_id is required"), 400);
+    if (typeof baseCommit !== "string" || !baseCommit.trim()) return c.json(wrapError(400, "base_commit is required"), 400);
+    if (typeof patch !== "string") return c.json(wrapError(400, "patch must be a string"), 400);
+    if (Buffer.byteLength(patch, "utf8") > 5 * 1024 * 1024) return c.json(wrapError(413, "patch exceeds 5 MiB"), 413);
+
+    const row = cgService.getById(serviceId, cgId);
+    if (!row) return c.json(wrapError(404, "code graph not found"), 404);
+    if (typeof body.team_id === "string" && body.team_id !== row.team_id) {
+      return c.json(wrapError(404, "code graph not found"), 404);
+    }
+
+    const readFileMap = (value: unknown): Record<string, string> | undefined => {
+      if (value === undefined) return undefined;
+      if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("file snapshots must be objects");
+      const result: Record<string, string> = {};
+      let bytes = 0;
+      for (const [path, content] of Object.entries(value as Record<string, unknown>)) {
+        if (typeof content !== "string") throw new Error(`snapshot content must be a string: ${path}`);
+        bytes += Buffer.byteLength(content, "utf8");
+        if (bytes > 10 * 1024 * 1024) throw new Error("file snapshots exceed 10 MiB");
+        result[path.replace(/\\/g, "/")] = content;
+      }
+      return result;
+    };
+
+    try {
+      const resultCommit = typeof body.result_commit === "string" && body.result_commit ? body.result_commit : undefined;
+      const result = taskCodeGraphChangeService.build({
+        service_id: serviceId,
+        team_id: row.team_id,
+        task_id: taskId,
+        code_graph_id: cgId,
+        base_commit: baseCommit,
+        result_commit: resultCommit,
+        result_snapshot: typeof body.result_snapshot === "string" ? body.result_snapshot : undefined,
+        graph_commit: row.commit_hash,
+        patch,
+        before_files: readFileMap(body.before_files),
+        after_files: readFileMap(body.after_files),
+      });
+      return c.json(wrapOk(result));
+    } catch (err) {
+      return c.json(wrapError(400, err instanceof Error ? err.message : String(err)), 400);
+    }
+  });
+
+  app.post("/task-diff/get", async (c) => {
+    const body = await c.req.json<Record<string, unknown>>();
+    const serviceId = extractServiceId(c.req.header("x-tdai-service-id"));
+    if (!serviceId) return c.json(wrapError(400, "x-tdai-service-id header is required"), 400);
+    const cgId = body.code_graph_id;
+    const taskId = body.task_id;
+    if (!isValidIdSegment(cgId)) return c.json(wrapError(400, "code_graph_id is required"), 400);
+    if (!isValidIdSegment(taskId)) return c.json(wrapError(400, "task_id is required"), 400);
+    const row = cgService.getById(serviceId, cgId);
+    if (!row) return c.json(wrapError(404, "code graph not found"), 404);
+    let change = taskCodeGraphChangeService.reconcile(serviceId, taskId, cgId, row.commit_hash);
+    if (!change) return c.json(wrapError(404, "task code graph change not found"), 404);
+    // The project branch may have advanced beyond result_commit. Preserve the
+    // attribution when the task commit is an ancestor of the indexed HEAD.
+    if (change.status === "candidate" && change.result_commit && row.status === "ready") {
+      try {
+        await simpleGit(cgService.dirFor(serviceId, row.team_id, cgId))
+          .raw(["merge-base", "--is-ancestor", change.result_commit, "HEAD"]);
+        change = taskCodeGraphChangeService.updateStatus(
+          serviceId,
+          taskId,
+          cgId,
+          "merged",
+          row.commit_hash,
+        )!;
+      } catch {
+        // A shallow clone may not contain the historical commit. Keep candidate
+        // rather than claiming provenance without evidence.
+      }
+    }
+    return c.json(wrapOk(change));
+  });
+
+  app.post("/task-diff/status", async (c) => {
+    const body = await c.req.json<Record<string, unknown>>();
+    const serviceId = extractServiceId(c.req.header("x-tdai-service-id"));
+    if (!serviceId) return c.json(wrapError(400, "x-tdai-service-id header is required"), 400);
+    const cgId = body.code_graph_id;
+    const taskId = body.task_id;
+    const status = body.status;
+    if (!isValidIdSegment(cgId)) return c.json(wrapError(400, "code_graph_id is required"), 400);
+    if (!isValidIdSegment(taskId)) return c.json(wrapError(400, "task_id is required"), 400);
+    if (status !== "candidate" && status !== "merged" && status !== "obsolete") {
+      return c.json(wrapError(400, "status must be candidate, merged or obsolete"), 400);
+    }
+    const row = cgService.getById(serviceId, cgId);
+    if (!row) return c.json(wrapError(404, "code graph not found"), 404);
+    const change = taskCodeGraphChangeService.updateStatus(
+      serviceId,
+      taskId,
+      cgId,
+      status as TaskCodeGraphChangeStatus,
+      row.commit_hash,
+    );
+    if (!change) return c.json(wrapError(404, "task code graph change not found"), 404);
+    return c.json(wrapOk(change));
+  });
+
   app.post("/delete", async (c) => {
     const body = await c.req.json<Record<string, unknown>>();
     const serviceId = c.req.header("x-tdai-service-id");
@@ -307,6 +427,7 @@ export function createCodeGraphRoutes(deps: CodeGraphRouteDeps): Hono {
       }
       const ok = cgService.delete(serviceId, row.team_id, id);
       if (ok) {
+        taskCodeGraphChangeService.deleteByCodeGraph(serviceId, id);
         // instance pool 释放已由 service.cleanupResources(releaseInstance) 统一处理。
         result.deleted_ids.push(id);
       } else {

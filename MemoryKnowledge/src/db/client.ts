@@ -140,6 +140,28 @@ export function migrate(_db: Db, raw: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_kcga_cg_version
       ON knowledge_code_graph_audit(code_graph_id, version DESC);
 
+    CREATE TABLE IF NOT EXISTS knowledge_task_code_graph_change (
+      change_id       TEXT PRIMARY KEY,
+      service_id      TEXT NOT NULL,
+      team_id         TEXT NOT NULL,
+      task_id         TEXT NOT NULL,
+      code_graph_id   TEXT NOT NULL,
+      base_commit     TEXT NOT NULL,
+      result_commit   TEXT,
+      result_snapshot TEXT,
+      graph_commit    TEXT,
+      status          TEXT NOT NULL DEFAULT 'candidate',
+      diff_json       TEXT NOT NULL,
+      created_at      TEXT NOT NULL,
+      updated_at      TEXT NOT NULL
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_ktcgc_task_graph
+      ON knowledge_task_code_graph_change(service_id, task_id, code_graph_id);
+
+    CREATE INDEX IF NOT EXISTS idx_ktcgc_team_task
+      ON knowledge_task_code_graph_change(service_id, team_id, task_id);
+
     CREATE TABLE IF NOT EXISTS llm_binding (
       service_id     TEXT PRIMARY KEY,
       mode           TEXT NOT NULL DEFAULT 'proxy',

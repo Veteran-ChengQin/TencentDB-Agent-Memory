@@ -42,6 +42,7 @@ import type {
   SessionInitState,
   TaskDetail,
 } from "../types.js";
+import { toTaskDetail } from "../task-asset-usage.js";
 import { buildSessionContextBlockWithToggles } from "../context-injector.js";
 import {
   parsePresetIdentity,
@@ -234,11 +235,7 @@ export async function handleWorkbuddySessionInit(
       }
       try {
         const task = await metadataClient.getTask(forcedTaskId);
-        taskDetail = {
-          id: task.task_id,
-          name: task.title,
-          description: task.description ?? undefined,
-        };
+        taskDetail = toTaskDetail(task);
       } catch (err) {
         console.warn(
           `[workbuddy-init] DEBUG getTask(${forcedTaskId}) failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -370,11 +367,7 @@ export async function handleWorkbuddySessionInit(
   try {
     if (resolution.taskId) {
       const task = await metadataClient.getTask(resolution.taskId);
-      taskDetail = {
-        id: task.task_id,
-        name: task.title,
-        description: task.description ?? undefined,
-      };
+      taskDetail = toTaskDetail(task);
     }
   } catch (err) {
     console.warn(

@@ -16,6 +16,7 @@ import { getSessionStore } from "../session/store.js";
 import { prewarmFromConfig } from "../injection/index.js";
 import type { SessionInitState, AgentDetail, TaskDetail } from "../session/types.js";
 import { getMetadataClient } from "../meta/client.js";
+import { toTaskDetail } from "../session/task-asset-usage.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -84,11 +85,7 @@ async function refreshAgentTaskDetail(
         } as AgentDetail))
       : Promise.resolve(null as AgentDetail | null),
     shouldFetchTask
-      ? client.getTask(taskId!).then((t) => ({
-          id: t.task_id,
-          name: t.title,
-          description: t.description ?? undefined,
-        } as TaskDetail))
+      ? client.getTask(taskId!).then(toTaskDetail)
       : Promise.resolve(null as TaskDetail | null),
   ]);
 

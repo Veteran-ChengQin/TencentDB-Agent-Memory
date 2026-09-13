@@ -16,6 +16,18 @@ export type {
   TaskStatus,
   TaskSourceType,
   Agent,
+  TaskAssetDeposition,
+  AssetMergeItem,
+  AssetDepositionStatus,
+  TaskChangedFile,
+  TaskSessionMessage,
+  TaskSessionTrace,
+  TaskVerification,
+  TaskKind,
+  TaskAssetUsage,
+  TaskUsableAsset,
+  RelatedTaskCandidate,
+  RelatedTaskEvidence,
 } from './backendStore';
 export type { AgentTemplate } from './agent-template-store';
 export type { AssetKind, AssetConfigScope, AssetScopeRecord } from './asset-scope-store';
@@ -44,6 +56,10 @@ export {
   deleteTaskAsync as deleteTask,
   updateTaskAsync as updateTask,
   updateTaskStatusAsync as updateTaskStatus,
+  updateTaskAssetDepositionAsync as updateTaskAssetDeposition,
+  updateTaskAssetUsageAsync as updateTaskAssetUsage,
+  findRelatedFeatureTasksAsync as findRelatedFeatureTasks,
+  deriveTaskProjectKey,
 } from './backendStore';
 
 // ===== Agent template service =====

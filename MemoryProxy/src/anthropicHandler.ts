@@ -744,6 +744,7 @@ export async function handleAnthropicMessages(
 
   // ── Session Init (before injection pipeline) ─────────────────────────────
   let sessionInfo: Record<string, unknown> | null | undefined;
+  let currentTaskDetail: import("./session/types.js").TaskDetail | null = null;
   let assetCapabilities: import("./injection/types.js").AssetCapabilityFlags | undefined;
   let injectedSkipped = !conversationId;
   let sessionJustRegistered = false;
@@ -967,6 +968,7 @@ export async function handleAnthropicMessages(
       }
 
       sessionInfo = initResult.sessionInfo as Record<string, unknown> | null | undefined;
+      currentTaskDetail = initResult.taskDetail ?? null;
       // Legacy sessions persisted before space_id was tracked will hydrate
       // with an empty space_id. Restore it from the URL each request so
       // downstream skill / knowledge / injection paths route to the correct
@@ -1218,7 +1220,9 @@ export async function handleAnthropicMessages(
         // 透传原始请求路径 —— AssetReflectionInjector 用它判断 `/analyse` marker。
         // 其它 injector 不依赖此字段。
         requestPath: c.req.path,
-        custom: sessionInfo ? { session: sessionInfo, userKey: callerUserKey ?? undefined, assetCapabilities } : undefined,
+        custom: sessionInfo
+          ? { session: sessionInfo, taskDetail: currentTaskDetail, userKey: callerUserKey ?? undefined, assetCapabilities }
+          : undefined,
         readOnly: requestKind === "fork",
       });
       body = injectedBody;

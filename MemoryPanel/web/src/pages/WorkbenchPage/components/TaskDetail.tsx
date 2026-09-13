@@ -5,10 +5,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button, Input, Segment, Text } from 'tea-component';
 import { DeleteIcon, EditIcon, UserIcon, UsergroupIcon } from 'tea-icons-react';
-import { canEditTask, type Task, type Team } from '@/services';
+import { canEditTask, type Task, type TaskAssetDeposition, type TaskAssetUsage, type Team } from '@/services';
 import { useUserDisplayName } from '@/services/user-profile-store';
 import { tea } from '@/lib/tea-bridge';
 import { useStatusLabels, type AgentOption, type TaskParticipationView } from '../utils/workbench-utils';
+import AssetDepositionPanel from './AssetDepositionPanel';
+import TaskAssetUsagePanel from './TaskAssetUsagePanel';
 
 /**
  * 参与者 chip：可见文本显示 display_name（缓存未命中先回退 id），
@@ -45,6 +47,8 @@ export default function TaskDetail({
   team,
   currentUser,
   participation,
+  onUpdateAssetDeposition,
+  onUpdateAssetUsage,
 }: {
   task: Task;
   onUpdateStatus: (s: Task['status']) => void;
@@ -58,6 +62,8 @@ export default function TaskDetail({
   currentUser: string;
   /** 从 useTeamParticipation 分桶后传下来的当前 task 观测数据 */
   participation: TaskParticipationView;
+  onUpdateAssetDeposition: (next: TaskAssetDeposition) => Promise<void>;
+  onUpdateAssetUsage: (next: TaskAssetUsage) => Promise<void>;
 }) {
   const { t } = useTranslation();
   const statusLabels = useStatusLabels();
@@ -211,6 +217,23 @@ export default function TaskDetail({
           <div className="_memory-workbench-desc-view">{task.description}</div>
         )}
       </div>
+
+      <TaskAssetUsagePanel
+        task={task}
+        canEdit={canEdit}
+        onChange={onUpdateAssetUsage}
+      />
+
+      {task.asset_deposition && (
+        <AssetDepositionPanel
+          taskId={task.task_id}
+          teamId={task.team_id}
+          currentUser={currentUser}
+          deposition={task.asset_deposition}
+          canEdit={canEdit}
+          onChange={onUpdateAssetDeposition}
+        />
+      )}
 
       <Text theme="weak" className="_memory-workbench-footer">
         {t('task.footer', { created: new Date(task.created_at_ms).toLocaleString(), updated: new Date(task.updated_at_ms).toLocaleString() })}

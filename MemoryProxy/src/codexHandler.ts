@@ -906,7 +906,7 @@ export async function handleCodexEndpoint(
         sessionKey,
         turnSeq: 0,
         requestPath: c.req.path,
-        custom: { session: sessionInfo, userKey: callerUserKey ?? undefined, assetCapabilities },
+        custom: { session: sessionInfo, taskDetail: cachedTaskDetail, userKey: callerUserKey ?? undefined, assetCapabilities },
       });
 
       // Extract injected content from the synthetic body's system message.

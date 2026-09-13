@@ -444,3 +444,32 @@ export function clearBackendCache(): void {
 export function invalidateTeamCache(teamId: string): void {
   useBackendStore.getState().invalidateTeam(teamId);
 }
+
+/**
+ * 原位更新已缓存的 Task。
+ *
+ * 资产审核等抽屉内操作只改变单个 Task 的 metadata；若为此清空整个后端缓存，
+ * 当前 Task 会在重新拉取期间短暂消失，导致详情抽屉关闭后再打开。这里保留列表
+ * 和选中状态，仅替换各分页缓存中的目标 Task。
+ */
+export function updateCachedTask(taskId: string, updater: (task: Task) => Task): void {
+  useBackendStore.setState((state) => {
+    let changed = false;
+    const tasksPagesByTeam = Object.fromEntries(
+      Object.entries(state.tasksPagesByTeam).map(([teamId, pages]) => [
+        teamId,
+        Object.fromEntries(
+          Object.entries(pages).map(([cacheKey, tasks]) => [
+            cacheKey,
+            tasks.map((task) => {
+              if (task.task_id !== taskId) return task;
+              changed = true;
+              return updater(task);
+            }),
+          ]),
+        ),
+      ]),
+    );
+    return changed ? { tasksPagesByTeam } : state;
+  });
+}

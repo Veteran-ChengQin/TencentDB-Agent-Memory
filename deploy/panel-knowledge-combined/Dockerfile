@@ -64,6 +64,12 @@ ENV NODE_ENV=production \
     KNOWLEDGE_DATA_DIR=/data/knowledge \
     KNOWLEDGE_DB_PATH=/data/knowledge/knowledge.db \
     TDAI_AGENT_TEMPLATE_DIR=/data/knowledge/agent-templates \
+    TDAI_SNAPSHOT_GITHUB_OWNER="" \
+    TDAI_SNAPSHOT_GITHUB_TOKEN="" \
+    TDAI_SNAPSHOT_REPO_PREFIX=tdai-snapshot \
+    TDAI_SNAPSHOT_EXCLUDED_PATHS=.github/workflows \
+    TDAI_SNAPSHOT_GIT_USER_NAME="TDAI Snapshot Bot" \
+    TDAI_SNAPSHOT_GIT_USER_EMAIL=tdai-snapshot@localhost \
     LOG_LEVEL=info \
     LOG_FORMAT=json
 

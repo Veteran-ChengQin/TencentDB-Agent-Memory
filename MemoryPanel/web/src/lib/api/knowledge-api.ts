@@ -105,6 +105,54 @@ export interface CodeGraphDetail {
   updated_at: string;
 }
 
+export type TaskCodeGraphChangeType = 'added' | 'modified' | 'deleted';
+
+export interface TaskCodeGraphChange {
+  change_id: string;
+  task_id: string;
+  code_graph_id: string;
+  base_commit: string;
+  result_commit: string | null;
+  result_snapshot: string | null;
+  graph_commit: string | null;
+  status: 'candidate' | 'merged' | 'obsolete';
+  diff: {
+    files: Array<{ path: string; change_type: TaskCodeGraphChangeType; additions: number; deletions: number }>;
+    entities: Array<{
+      stable_key: string;
+      name: string;
+      kind: string;
+      path: string;
+      change_type: TaskCodeGraphChangeType;
+      before_signature?: string;
+      after_signature?: string;
+      line?: number;
+    }>;
+    relations: Array<{
+      stable_key: string;
+      source: string;
+      target: string;
+      kind: 'imports' | 'calls' | 'inherits';
+      path: string;
+      change_type: TaskCodeGraphChangeType;
+    }>;
+    summary: { files: number; entities: number; relations: number; added: number; modified: number; deleted: number };
+  };
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TaskSnapshotCodeGraphResult {
+  code_graph: CodeGraphDetail;
+  snapshot: {
+    repoUrl: string;
+    repository: string;
+    branch: string;
+    commit: string;
+    canonicalProject: string;
+  };
+}
+
 // ---- 兼容旧类型（平滑过渡） ----
 
 /** @deprecated 用 WikiDetail 替代 */
@@ -160,7 +208,7 @@ export interface GraphNode { id: string; label: string; type: string; path: stri
 export interface GraphEdge { source: string; target: string; weight: number; }
 export interface GraphData { nodes: GraphNode[]; edges: GraphEdge[]; communities?: { id: number; nodeCount: number; topNodes: string[] }[]; }
 
-export interface WikiPage { path: string; title: string; type: string; tags?: string[]; created?: string; updated?: string; }
+export interface WikiPage { id?: string; path: string; title: string; type: string; tags?: string[]; created?: string; updated?: string; }
 
 /** meta + KS join 后的列表项（team-assets） */
 export interface KnowledgeAssetItem {
@@ -386,6 +434,13 @@ export const knowledgeApi = {
       return { content: item?.content ?? '' };
     },
 
+    /** 批量读取 processed 页面，用于比较 ingest 前后的实际页面变化。 */
+    readMany: (
+      wikiId: string,
+      refs: string[],
+    ): Promise<{ items: Array<{ ref: string; content?: string; not_found?: boolean }> }> =>
+      panelPost('/wiki/page/read', { wiki_id: wikiId, refs }),
+
     /** 删除 processed wiki 页面 */
     pageDelete: (wikiId: string, refs: string[]): Promise<void> =>
       panelPost('/wiki/page/rm', { wiki_id: wikiId, refs }),
@@ -416,6 +471,14 @@ export const knowledgeApi = {
     upload: (opts: { teamId: string; wikiId: string; filename: string; content: string }): Promise<void> =>
       panelPost('/wiki/raw/write', { team_id: opts.teamId, wiki_id: opts.wikiId, files: [{ filename: opts.filename, content: opts.content }] }),
 
+    /** 批量写入 Wiki 原始文档；调用方按服务端每批最多 10 个文件进行分批。 */
+    uploadMany: (
+      teamId: string,
+      wikiId: string,
+      files: Array<{ filename: string; content: string }>,
+    ): Promise<void> =>
+      panelPost('/wiki/raw/write', { team_id: teamId, wiki_id: wikiId, files }),
+
     allocate: (teamId: string, wikiId: string, agentId: string): Promise<void> =>
       allocateKnowledge(teamId, wikiId, agentId),
 
@@ -434,6 +497,24 @@ export const knowledgeApi = {
     /** 创建（注册仓库） */
     create: (opts: { teamId: string; repoUrl: string; branch?: string; repoName?: string }): Promise<CodeGraphDetail> =>
       panelPost('/code-graph/create', { team_id: opts.teamId, repo_url: opts.repoUrl, branch: opts.branch ?? 'main', repo_name: opts.repoName }),
+
+    /** 将 Task 的验证通过结果发布为完整仓库快照，并创建新的 CKG。 */
+    createTaskSnapshot: (input: {
+      teamId: string;
+      taskId: string;
+      sourceRepoUrl: string;
+      canonicalProject: string;
+      baseCommit: string;
+      patch: string;
+    }): Promise<TaskSnapshotCodeGraphResult> =>
+      panelPost('/code-graph/task-snapshot/create', {
+        team_id: input.teamId,
+        task_id: input.taskId,
+        source_repo_url: input.sourceRepoUrl,
+        canonical_project: input.canonicalProject,
+        base_commit: input.baseCommit,
+        patch: input.patch,
+      }),
 
     /** @deprecated 使用 teamAssets */
     list: async (teamId: string): Promise<CodeGraphDetail[]> => {
@@ -454,6 +535,39 @@ export const knowledgeApi = {
     /** 触发 sync（异步，同 ingest 轮询 get） */
     sync: (codeGraphId: string): Promise<void> =>
       panelPost('/code-graph/sync', { code_graph_id: codeGraphId }),
+
+    buildTaskDiff: (input: {
+      teamId: string;
+      taskId: string;
+      codeGraphId: string;
+      baseCommit: string;
+      resultCommit?: string;
+      resultSnapshot?: string;
+      patch: string;
+      beforeFiles?: Record<string, string>;
+      afterFiles?: Record<string, string>;
+    }): Promise<TaskCodeGraphChange> =>
+      panelPost('/code-graph/task-diff/build', {
+        team_id: input.teamId,
+        task_id: input.taskId,
+        code_graph_id: input.codeGraphId,
+        base_commit: input.baseCommit,
+        result_commit: input.resultCommit,
+        result_snapshot: input.resultSnapshot,
+        patch: input.patch,
+        before_files: input.beforeFiles,
+        after_files: input.afterFiles,
+      }),
+
+    getTaskDiff: (taskId: string, codeGraphId: string): Promise<TaskCodeGraphChange> =>
+      panelPost('/code-graph/task-diff/get', { task_id: taskId, code_graph_id: codeGraphId }),
+
+    updateTaskDiffStatus: (
+      taskId: string,
+      codeGraphId: string,
+      status: TaskCodeGraphChange['status'],
+    ): Promise<TaskCodeGraphChange> =>
+      panelPost('/code-graph/task-diff/status', { task_id: taskId, code_graph_id: codeGraphId, status }),
 
     /** 删除 */
     delete: (codeGraphId: string): Promise<void> =>

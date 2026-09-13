@@ -29,6 +29,7 @@ import type { BindingRepo, SessionBinding } from "../db/binding-repo.js";
 import type { MetadataClient } from "../meta/client.js";
 import { isDshRuntimeContextSnapshot } from "../common/user-query-extractor.js";
 import type { PresetIdentity } from "./preset.js";
+import { toTaskDetail } from "./task-asset-usage.js";
 
 const DEFAULT_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
@@ -582,11 +583,7 @@ export class SessionStore {
     }
     if (taskR.status === "fulfilled") {
       if (taskR.value) {
-        taskDetail = {
-          id: taskR.value.task_id,
-          name: taskR.value.title,
-          description: taskR.value.description ?? undefined,
-        };
+        taskDetail = toTaskDetail(taskR.value);
       }
     } else {
       if (isNotFound(taskR.reason)) taskNotFound = true;

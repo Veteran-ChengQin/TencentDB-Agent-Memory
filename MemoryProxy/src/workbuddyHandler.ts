@@ -1425,6 +1425,7 @@ export async function handleWorkbuddyEndpoint(
         requestPath: path,
         custom: {
           session: sessionInfo,
+          taskDetail: cachedTaskDetail,
           userKey: callerUserKey ?? undefined,
           assetCapabilities,
         },

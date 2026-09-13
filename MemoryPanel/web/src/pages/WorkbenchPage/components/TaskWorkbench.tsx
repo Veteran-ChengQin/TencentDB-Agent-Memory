@@ -20,6 +20,8 @@ import {
   deleteTask,
   updateTask,
   updateTaskStatus,
+  updateTaskAssetDeposition,
+  updateTaskAssetUsage,
   canDeleteTask,
   canEditTask,
 } from '@/services';
@@ -174,6 +176,28 @@ export default function TaskWorkbench(props: {
             } catch (err) {
               tea.notify.error(errMsg(err));
             }
+          }}
+          onUpdateAssetDeposition={async (task, next) => {
+            const team = teams.find((t) => t.team_id === task.team_id) ?? null;
+            if (!canEditTask(task, team, currentUser)) {
+              tea.notify.warning(t('task.noPermissionEdit'));
+              return;
+            }
+            try {
+              await updateTaskAssetDeposition(task.task_id, next);
+              tea.notify.success('资产沉淀计划已更新。');
+            } catch (err) {
+              tea.notify.error(errMsg(err));
+              throw err;
+            }
+          }}
+          onUpdateAssetUsage={async (task, next) => {
+            const team = teams.find((t) => t.team_id === task.team_id) ?? null;
+            if (!canEditTask(task, team, currentUser)) {
+              tea.notify.warning(t('task.noPermissionEdit'));
+              throw new Error(t('task.noPermissionEdit'));
+            }
+            await updateTaskAssetUsage(task.task_id, next);
           }}
           agents={agents}
           teams={teams}

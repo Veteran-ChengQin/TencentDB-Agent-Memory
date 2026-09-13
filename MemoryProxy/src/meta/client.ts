@@ -79,6 +79,7 @@ export interface TaskEntity {
   description?: string | null;
   status?: string;
   source_type?: string;
+  metadata_json?: string | null;
 }
 
 /**

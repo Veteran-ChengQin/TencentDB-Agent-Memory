@@ -36,6 +36,8 @@ import {
   type ListingResult,
 } from "../../skill/core-client.js";
 import type { CoreSkillConfig } from "../../types.js";
+import type { TaskDetail, TaskUsableAssetDetail } from "../../session/types.js";
+import { getMetadataClient } from "../../meta/client.js";
 
 const TAG = "[skill-injector]";
 
@@ -90,7 +92,18 @@ const SKILL_LISTING_FOOTER =
  *   3. `<available_skills>` listing (verbatim from core).
  *   4. SKILL_LISTING_FOOTER — "only skip if genuinely nothing matches".
  */
-export function wrapAvailableSkillsBlock(listing: string): string {
+export function wrapAvailableSkillsBlock(
+  listing: string,
+  taskSkills: TaskUsableAssetDetail[] = [],
+): string {
+  const taskListing = taskSkills.length > 0
+    ? [
+        "<task_recommended_skills>",
+        "以下 Skill 已由任务负责人从相关历史任务中确认，可按需通过 skill_view 加载：",
+        ...taskSkills.map((skill) => `- ${skill.name}（来源 Task：${skill.sourceTaskId || "未知"}）`),
+        "</task_recommended_skills>",
+      ].join("\n")
+    : "";
   return [
     SKILL_LISTING_HEADER,
     "以下是你（当前 agent）自带的云端 skill 列表。这些 skill 存储在你的 agent 名下，",
@@ -100,6 +113,7 @@ export function wrapAvailableSkillsBlock(listing: string): string {
     "**重要：这些 skill 存储在云端，不能使用 read_file / tool_use 直接访问，\n必须用 Bash 执行 curl 调用上方 <skill_tools> 块中的 skill-bridge 工具。**",
     "",
     listing,
+    taskListing,
     SKILL_LISTING_FOOTER,
   ].join("\n");
 }
@@ -191,14 +205,20 @@ export class SkillInjector implements InjectionHook {
     const session = custom?.session as {
       team_id?: string;
       agent_id?: string;
+      user_id?: string;
       space_id?: string;
     } | undefined;
+    const userKey = typeof custom?.userKey === "string" ? custom.userKey : undefined;
+    const taskDetail = (custom?.taskDetail as TaskDetail | null | undefined) ?? null;
     // No search query on the live path — core will route to mode=full.
     return this.renderListingBlocks({
       team_id: session?.team_id,
       agent_id: session?.agent_id,
+      user_id: session?.user_id,
+      user_key: userKey,
       space_id: session?.space_id,
       query: undefined,
+      taskSkills: taskDetail?.assetUsage?.enabledAssets.filter((asset) => asset.assetType === "skill") ?? [],
       trigger: "execute",
     });
   }
@@ -218,8 +238,11 @@ export class SkillInjector implements InjectionHook {
     return this.renderListingBlocks({
       team_id: ids?.team_id,
       agent_id: ids?.agent_id,
+      user_id: ids?.user_id || input.userId,
+      user_key: input.callerUserKey,
       space_id: ids?.space_id,
       query,
+      taskSkills: input.taskDetail?.assetUsage?.enabledAssets.filter((asset) => asset.assetType === "skill") ?? [],
       trigger: "prewarm",
     });
   }
@@ -240,11 +263,15 @@ export class SkillInjector implements InjectionHook {
   private async renderListingBlocks(args: {
     team_id?: string;
     agent_id?: string;
+    user_id?: string;
+    user_key?: string;
     space_id?: string;
     query: string | undefined;
+    taskSkills: TaskUsableAssetDetail[];
     trigger: "prewarm" | "execute";
   }): Promise<ContextBlock[]> {
-    const { team_id, agent_id, space_id, query, trigger } = args;
+    const { team_id, agent_id, user_id, user_key, space_id, query, trigger } = args;
+    let taskSkills = args.taskSkills;
     if (!team_id || !agent_id) {
       console.log(
         `${TAG} ${trigger}: missing session identity (team_id/agent_id) — skipping listing`,
@@ -257,13 +284,40 @@ export class SkillInjector implements InjectionHook {
     // when absent CoreSkillClient falls back to `config.coreSkill.serviceId`
     // (older single-tenant deployments).
     const serviceId = space_id || undefined;
+
+    // Task recommendations are a control-plane selection, not an ACL bypass.
+    // Fail closed for this extra catalog while preserving the Agent's own list.
+    if (taskSkills.length > 0) {
+      if (!user_id || !user_key) {
+        taskSkills = [];
+      } else {
+        try {
+          const metadata = getMetadataClient(
+            this.config.coreSkill,
+            space_id || this.config.coreSkill.serviceId,
+            user_key,
+          );
+          const accessible = await metadata.listAccessibleAssets({
+            user_id,
+            team_id,
+            asset_type: "skill",
+            action: "read",
+          });
+          const accessibleIds = new Set(accessible.map((asset) => asset.asset_id));
+          taskSkills = taskSkills.filter((skill) => accessibleIds.has(skill.assetId));
+        } catch (err) {
+          console.warn(`${TAG} ${trigger} task skill ACL lookup failed: ${(err as Error).message}`);
+          taskSkills = [];
+        }
+      }
+    }
     console.log(
       `${TAG} ${trigger} team=${team_id} agent=${agent_id}`
         + ` space=${space_id ?? "(none)"} serviceId=${serviceId ?? "(fallback config)"}`
         + ` query=${JSON.stringify(query?.slice(0, 80) ?? null)}`,
     );
 
-    let result: ListingResult;
+    let result: ListingResult = { listing: "", hits: [], mode: "full" };
     try {
       const client = this.clientOverride ?? getCoreSkillClient(this.config.coreSkill);
       result = await client.listListing({
@@ -279,19 +333,21 @@ export class SkillInjector implements InjectionHook {
       console.warn(
         `${TAG} ${trigger} core listing failed, degrading to empty <available_skills>: ${(err as Error).message}`,
       );
-      return [];
+      if (taskSkills.length === 0) return [];
     }
 
     const listing = result.listing;
-    if (!listing || listing.includes("(none)")) return [];
+    const normalizedListing = !listing || listing.includes("(none)") ? "" : listing;
+    if (!normalizedListing && taskSkills.length === 0) return [];
 
-    const content = wrapAvailableSkillsBlock(listing);
+    const content = wrapAvailableSkillsBlock(normalizedListing, taskSkills);
     return [{
       type: "text",
       content,
       metadata: {
         source: this.id,
         skillCount: result.hits.length,
+        taskSkillCount: taskSkills.length,
         mode: result.mode,
         // Shared cache key across prewarm + execute so pipeline self-heal
         // writes replace, not fragment, the prewarmed entry.

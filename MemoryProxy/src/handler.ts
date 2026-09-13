@@ -848,6 +848,7 @@ export async function handleChatCompletions(
 
   // ── Session Init (before injection pipeline) ─────────────────────────────
   let sessionInfo: Record<string, unknown> | null | undefined;
+  let currentTaskDetail: import("./session/types.js").TaskDetail | null = null;
   let assetCapabilities: import("./injection/types.js").AssetCapabilityFlags | undefined;
   let injectedSkipped = !conversationId || isAuxiliary || _dshHeadless;
   let sessionJustRegistered = false;
@@ -1088,6 +1089,7 @@ export async function handleChatCompletions(
       }
 
       sessionInfo = initResult.sessionInfo as Record<string, unknown> | null | undefined;
+      currentTaskDetail = initResult.taskDetail ?? null;
       // Belt-and-suspenders: also restore on the local `sessionInfo` alias.
       // In practice this is the same object reference as
       // `initResult.sessionInfo` (already restored above), but the second
@@ -1318,6 +1320,7 @@ export async function handleChatCompletions(
         custom: sessionInfo
           ? {
               session: sessionInfo,
+              taskDetail: currentTaskDetail,
               assetCapabilities,
               userKey: apiKey || undefined,
             }

@@ -4,7 +4,7 @@
 import { useTranslation } from 'react-i18next';
 import { Button, Drawer, Pagination, Tag, Text } from 'tea-component';
 import { AddIcon, ChevronRightIcon, UsergroupIcon } from 'tea-icons-react';
-import { canDeleteTask, type Task, type Team } from '@/services';
+import { canDeleteTask, type Task, type TaskAssetDeposition, type TaskAssetUsage, type Team } from '@/services';
 import { useDisplayNameResolver } from '@/services/user-profile-store';
 import TaskDetail from './TaskDetail';
 import { participationOf, useStatusLabels, type AgentOption, type TaskParticipationView } from '../utils/workbench-utils';
@@ -22,6 +22,8 @@ export default function BoardView({
   onDelete,
   onUpdateStatus,
   onUpdateTask,
+  onUpdateAssetDeposition,
+  onUpdateAssetUsage,
   agents,
   teams,
   currentUser,
@@ -39,6 +41,8 @@ export default function BoardView({
   onDelete: (task: Task) => void;
   onUpdateStatus: (task: Task, status: Task['status']) => void;
   onUpdateTask: (task: Task, patch: Partial<Pick<Task, 'title' | 'description' | 'source_type' | 'source_url' | 'linked_agents'>>) => void;
+  onUpdateAssetDeposition: (task: Task, next: TaskAssetDeposition) => Promise<void>;
+  onUpdateAssetUsage: (task: Task, next: TaskAssetUsage) => Promise<void>;
   agents: AgentOption[];
   teams: Team[];
   currentUser: string;
@@ -93,6 +97,9 @@ export default function BoardView({
             const imParticipant = view.users.includes(currentUser);
             const agentNameById = new Map(agents.map((a) => [a.id, a.name]));
             const agentLabels = view.agentIds.map((id) => agentNameById.get(id) ?? id);
+            const assetItems = task.asset_deposition?.merge_items ?? [];
+            const mergedAssets = assetItems.filter((item) => ['saved', 'merged'].includes(item.status)).length;
+            const blockedAssets = assetItems.filter((item) => ['blocked', 'failed', 'conflict'].includes(item.status)).length;
             return (
               <button
                 type="button"
@@ -112,6 +119,14 @@ export default function BoardView({
                 {/* 描述 */}
                 {task.description && (
                   <p className="_memory-workbench-task-card-desc">{task.description}</p>
+                )}
+
+                {assetItems.length > 0 && (
+                  <div className="_memory-workbench-asset-glance">
+                    <span>资产 {assetItems.length}</span>
+                    <span className="is-ready">已沉淀 {mergedAssets}</span>
+                    {blockedAssets > 0 && <span className="is-blocked">阻断 {blockedAssets}</span>}
+                  </div>
                 )}
 
                 {/* 元信息行：参与者 · Agent · 时间 */}
@@ -185,6 +200,8 @@ export default function BoardView({
             team={selectedTeam}
             currentUser={currentUser}
             participation={participationOf(participationByTask, selected.task_id)}
+            onUpdateAssetDeposition={(next) => onUpdateAssetDeposition(selected, next)}
+            onUpdateAssetUsage={(next) => onUpdateAssetUsage(selected, next)}
           />
         )}
       </Drawer>

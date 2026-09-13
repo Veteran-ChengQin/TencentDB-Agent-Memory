@@ -117,6 +117,7 @@ export const tasksApi = {
       status: TaskStatus;
       risk_level: 'low' | 'medium' | 'high';
       source_url: string;
+      metadata_json: string;
     }>
   ) => metaPost<BackendTask>('task/update', { task_id: taskId, ...data }),
 

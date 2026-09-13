@@ -14,6 +14,7 @@ import type { Db } from "./db/client.js";
 import { SqliteKnowledgeStore, type IKnowledgeStore } from "./store/index.js";
 import { WikiService, type WikiWorker } from "./store/index.js";
 import { CodeGraphService, type CodeGraphWorker } from "./store/index.js";
+import { TaskCodeGraphChangeService } from "./store/index.js";
 import { BuildQueue } from "./store/index.js";
 import {
   createLlmBindingStore,
@@ -59,6 +60,7 @@ export interface CodeGraphInstancePool {
 export interface KnowledgeModule {
   wikiService: WikiService;
   cgService: CodeGraphService;
+  taskCodeGraphChangeService: TaskCodeGraphChangeService;
   wikiMgr: WikiSourceManager;
   store: IKnowledgeStore;
   instancePool: CodeGraphInstancePool;
@@ -230,6 +232,7 @@ export function createKnowledgeModule(config: KnowledgeModuleConfig): KnowledgeM
       instancePool.delete(codeGraphId);
     },
   });
+  const taskCodeGraphChangeService = new TaskCodeGraphChangeService(config.db);
 
   // Restart recovery: mark interrupted tasks as failed
   const interrupted = store.markInterruptedAsFailed();
@@ -293,5 +296,15 @@ export function createKnowledgeModule(config: KnowledgeModuleConfig): KnowledgeM
   });
   autoSyncScheduler.start();
 
-  return { wikiService, cgService, wikiMgr, store, instancePool, llmBindingStore, autoSyncScheduler, autoSyncConfig };
+  return {
+    wikiService,
+    cgService,
+    taskCodeGraphChangeService,
+    wikiMgr,
+    store,
+    instancePool,
+    llmBindingStore,
+    autoSyncScheduler,
+    autoSyncConfig,
+  };
 }

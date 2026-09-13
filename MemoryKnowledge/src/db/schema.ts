@@ -123,6 +123,31 @@ export const knowledgeCodeGraphAudit = sqliteTable(
   (table) => [index("idx_kcga_cg_version").on(table.codeGraphId, table.version)],
 );
 
+// A project code graph is shared by many tasks. This table stores the immutable
+// per-task delta instead of overloading knowledge_code_graph.task_id.
+export const knowledgeTaskCodeGraphChange = sqliteTable(
+  "knowledge_task_code_graph_change",
+  {
+    changeId: text("change_id").primaryKey(),
+    serviceId: text("service_id").notNull(),
+    teamId: text("team_id").notNull(),
+    taskId: text("task_id").notNull(),
+    codeGraphId: text("code_graph_id").notNull(),
+    baseCommit: text("base_commit").notNull(),
+    resultCommit: text("result_commit"),
+    resultSnapshot: text("result_snapshot"),
+    graphCommit: text("graph_commit"),
+    status: text("status").notNull().default("candidate"),
+    diffJson: text("diff_json").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_ktcgc_task_graph").on(table.serviceId, table.taskId, table.codeGraphId),
+    index("idx_ktcgc_team_task").on(table.serviceId, table.teamId, table.taskId),
+  ],
+);
+
 // ───────────────────────── llm_binding ─────────────────────────
 // Per-instance (service_id) LLM routing for wiki ingest/summary.
 // mode='proxy' → call context_proxy with a dedicated knowledge-service user_key;
@@ -144,6 +169,7 @@ export type KnowledgeCodeGraph = typeof knowledgeCodeGraph.$inferSelect;
 export type KnowledgeWiki = typeof knowledgeWiki.$inferSelect;
 export type KnowledgeWikiAudit = typeof knowledgeWikiAudit.$inferSelect;
 export type KnowledgeCodeGraphAudit = typeof knowledgeCodeGraphAudit.$inferSelect;
+export type KnowledgeTaskCodeGraphChange = typeof knowledgeTaskCodeGraphChange.$inferSelect;
 export type LlmBinding = typeof llmBinding.$inferSelect;
 
 /** Data format version constants (reserved field). */

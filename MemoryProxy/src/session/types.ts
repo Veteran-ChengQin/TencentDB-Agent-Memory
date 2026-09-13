@@ -194,6 +194,23 @@ export interface TaskDetail {
   description?: string;
   /** Optional structured goal/acceptance criteria text. */
   goal?: string;
+  /** Assets explicitly enabled for this Task in Memory Hub. */
+  assetUsage?: TaskAssetUsageDetail;
+}
+
+export type TaskUsableAssetType = "llm_wiki" | "code_graph" | "skill" | "chat_memory";
+
+export interface TaskUsableAssetDetail {
+  assetId: string;
+  assetType: TaskUsableAssetType;
+  name: string;
+  sourceTaskId: string;
+}
+
+export interface TaskAssetUsageDetail {
+  taskKind?: "feature" | "bug";
+  projectKey: string;
+  enabledAssets: TaskUsableAssetDetail[];
 }
 
 /**

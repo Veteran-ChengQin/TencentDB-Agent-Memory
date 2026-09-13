@@ -103,14 +103,18 @@ function ns(linkCount: number, maxLinks: number, nodeCount: number): number {
 function layoutIter(n: number): number { return n > 2500 ? 28 : n > 1200 ? 40 : n > 600 ? 65 : n > 250 ? 90 : 140; }
 
 // --- Graph Loader ---
-function GraphLoader({ nodes, edges, colorMode, onNodeClick, highlightNode, palette }: {
+function GraphLoader({ nodes, edges, colorMode, onNodeClick, highlightNode, highlightNodes, compact, palette }: {
   nodes: GraphNode[]; edges: GraphEdge[]; colorMode: ColorMode;
-  onNodeClick?: (n: GraphNode) => void; highlightNode?: string | null; palette: AtlasPalette;
+  onNodeClick?: (n: GraphNode) => void; highlightNode?: string | null; highlightNodes?: string[]; compact?: boolean; palette: AtlasPalette;
 }) {
   const loadGraph = useLoadGraph();
   const sigma = useSigma();
   const registerEvents = useRegisterEvents();
   const [hovered, setHovered] = useState<{ node: string; neighbors: Set<string> } | null>(null);
+  const highlightedNodeSet = useMemo(
+    () => new Set([...(highlightNodes ?? []), ...(highlightNode ? [highlightNode] : [])]),
+    [highlightNode, highlightNodes],
+  );
 
   useEffect(() => {
     const graph = new Graph();
@@ -119,7 +123,14 @@ function GraphLoader({ nodes, edges, colorMode, onNodeClick, highlightNode, pale
       const color = colorMode === "community"
         ? palette.communityColors[node.community % palette.communityColors.length]
         : nc(node.type, palette);
-      graph.addNode(node.id, { x: Math.random() * 100, y: Math.random() * 100, size: ns(node.linkCount, maxLinks, nodes.length), color, label: node.label });
+      const size = ns(node.linkCount, maxLinks, nodes.length);
+      graph.addNode(node.id, {
+        x: Math.random() * 100,
+        y: Math.random() * 100,
+        size: compact ? Math.min(size * .55, 10) : size,
+        color,
+        label: node.label,
+      });
     }
     const maxW = Math.max(...edges.map((e) => e.weight), 1);
     for (const edge of edges) {
@@ -149,7 +160,14 @@ function GraphLoader({ nodes, edges, colorMode, onNodeClick, highlightNode, pale
   useEffect(() => {
     sigma.setSetting("nodeReducer", (node, data) => {
       const res = { ...data };
-      if (highlightNode && node === highlightNode) { res.highlighted = true; res.zIndex = 2; }
+      if (highlightedNodeSet.has(node)) {
+        res.highlighted = true;
+        res.zIndex = 2;
+        res.color = '#e11d48';
+        res.size = compact
+          ? Math.min(Math.max((data.size || BASE_NODE_SIZE) * 1.12, 7), 11)
+          : Math.max((data.size || BASE_NODE_SIZE) * 1.35, 10);
+      }
       if (hovered) {
         if (node === hovered.node) { res.highlighted = true; res.zIndex = 2; res.size = (data.size || BASE_NODE_SIZE) * 1.3; }
         else if (hovered.neighbors.has(node)) { res.zIndex = 1; }
@@ -167,7 +185,7 @@ function GraphLoader({ nodes, edges, colorMode, onNodeClick, highlightNode, pale
       return res;
     });
     sigma.refresh();
-  }, [hovered, highlightNode, palette, sigma]);
+  }, [hovered, highlightedNodeSet, compact, palette, sigma]);
 
   return null;
 }
@@ -188,10 +206,10 @@ function GraphControls() {
 // --- Main Component ---
 interface Props {
   data: GraphData | null; loading?: boolean;
-  onNodeClick?: (node: GraphNode) => void; highlightNode?: string | null; className?: string;
+  onNodeClick?: (node: GraphNode) => void; highlightNode?: string | null; highlightNodes?: string[]; compact?: boolean; className?: string;
 }
 
-export default function KnowledgeGraph({ data, loading, onNodeClick, highlightNode, className }: Props) {
+export default function KnowledgeGraph({ data, loading, onNodeClick, highlightNode, highlightNodes, compact = false, className }: Props) {
   const { t } = useTranslation();
   const [colorMode, setColorMode] = useState<ColorMode>("type");
   const [hideStructural, setHideStructural] = useState(true);
@@ -232,7 +250,7 @@ export default function KnowledgeGraph({ data, loading, onNodeClick, highlightNo
   return (
     <div className={`relative flex flex-col overflow-hidden ${className}`} style={{ background: palette.bg }}>
       {/* Toolbar */}
-      <div className="flex items-center gap-2 border-b border-border px-3 py-2 z-10" style={{ background: palette.toolbarBg, backdropFilter: 'blur(8px)' }}>
+      {!compact && <div className="flex items-center gap-2 border-b border-border px-3 py-2 z-10" style={{ background: palette.toolbarBg, backdropFilter: 'blur(8px)' }}>
         <div className="relative flex-1 max-w-[180px]">
           <span className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground/70 text-xs inline-flex items-center"><SearchIcon size={12} /></span>
           <input
@@ -252,7 +270,7 @@ export default function KnowledgeGraph({ data, loading, onNodeClick, highlightNo
         <button className={`rounded-md px-2 py-1 text-xs font-medium transition ${hideStructural ? "bg-success/10 text-success ring-1 ring-success/30" : "text-muted-foreground hover:text-foreground/70 hover:bg-muted"}`}
           onClick={() => setHideStructural(!hideStructural)} title={t('graph.hideStructural.title')}>{t('graph.hideStructural')}</button>
         <span className="text-xs ml-auto font-mono text-muted-foreground">{t('graph.stats', { nodes: filteredData.nodes.length, edges: filteredData.edges.length })}</span>
-      </div>
+      </div>}
 
       {/* Search results dropdown */}
       {searchResults.length > 0 && searchQuery && (
@@ -282,14 +300,20 @@ export default function KnowledgeGraph({ data, loading, onNodeClick, highlightNo
             minCameraRatio: 0.06, maxCameraRatio: 4,
           }}
         >
-          <GraphLoader nodes={filteredData.nodes} edges={filteredData.edges} colorMode={colorMode} onNodeClick={onNodeClick} highlightNode={highlightNode} palette={palette} />
+          <GraphLoader nodes={filteredData.nodes} edges={filteredData.edges} colorMode={colorMode} onNodeClick={onNodeClick} highlightNode={highlightNode} highlightNodes={highlightNodes} compact={compact} palette={palette} />
           <GraphControls />
         </SigmaContainer>
       </div>
 
       {/* Legend */}
       <div className="flex flex-wrap items-center gap-3 border-t border-border px-3 py-1.5 z-10" style={{ background: palette.toolbarBg, backdropFilter: 'blur(8px)' }}>
-        {types.map((type) => {
+        {(highlightNodes?.length ?? 0) > 0 && (
+          <div className="flex items-center gap-1.5 rounded-md border border-rose-200 bg-rose-50 px-2 py-0.5 mr-2">
+            <div className="h-2.5 w-2.5 rounded-full" style={{ background: '#e11d48' }} />
+            <span className="text-xs text-muted-foreground">本次 Task 贡献</span>
+          </div>
+        )}
+        {!compact && types.map((type) => {
           const c = colorMode === "type" ? nc(type, palette) : palette.dim;
           const isAccent = c !== palette.dim;
           return (

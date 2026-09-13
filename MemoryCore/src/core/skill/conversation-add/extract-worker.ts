@@ -381,7 +381,11 @@ export class SkillConversationExtractWorker {
             );
             const t0Ext = Date.now();
             const result = await this.opts.extractor.extract({
-              task_id: head.task_id,
+              // direct-trigger 同时有两个 ID：head.task_id 是归档队列任务，
+              // task_ref_id 才是 Hub 中的业务 Task。SkillStore.task_id 是审计与
+              // 归因字段，应优先保存业务 ID；普通 conversation/add 没有业务
+              // Task 时再回退到归档任务 ID。
+              task_id: head.task_ref_id ?? head.task_id,
               team_id: head.team_id,
               user_id: head.user_id,
               agent_id: head.agent_id,

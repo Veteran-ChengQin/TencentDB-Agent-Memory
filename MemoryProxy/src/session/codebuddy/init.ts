@@ -24,6 +24,7 @@ import { buildSessionInfo } from "../registrar.js";
 import { injectSessionContextWithToggles } from "../context-injector.js";
 import type { MetadataClient } from "../../meta/client.js";
 import { resolvePresetIdentity, type PresetIdentity } from "../preset.js";
+import { toTaskDetail } from "../task-asset-usage.js";
 
 import { buildFormResponse, FormData } from "./form.js";
 import { buildBypassNoticeResponse } from "../workbuddy/text-form.js";
@@ -439,11 +440,7 @@ export async function completeRegistration(
         prompt: a.prompt ?? undefined,
       })),
       shouldFetchTask
-        ? metadataClient.getTask(regData.task_id!).then((t) => ({
-            id: t.task_id,
-            name: t.title,
-            description: t.description ?? undefined,
-          }))
+        ? metadataClient.getTask(regData.task_id!).then(toTaskDetail)
         : Promise.resolve(null),
     ]);
     if (agentRes.status === "fulfilled") agentDetail = agentRes.value;

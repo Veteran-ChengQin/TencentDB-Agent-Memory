@@ -30,6 +30,9 @@ import type {
   CodeGraphListResult,
   CodeGraphSyncResult,
   CodeGraphToolResult,
+  BuildTaskCodeGraphChangeInput,
+  TaskCodeGraphChange,
+  TaskCodeGraphChangeStatus,
 } from '../ports/knowledge-client-port.js';
 
 export interface KnowledgeClientConfig {
@@ -186,5 +189,21 @@ export class HttpKnowledgeClient implements KnowledgeClientPort {
 
   async codeGraphQuery(codeGraphId: string, tool: string, params: Record<string, unknown>): Promise<CodeGraphToolResult> {
     return this.post(`/v3/code-graph/${tool}`, { code_graph_id: codeGraphId, ...params });
+  }
+
+  async taskCodeGraphChangeBuild(input: BuildTaskCodeGraphChangeInput): Promise<TaskCodeGraphChange> {
+    return this.post('/v3/code-graph/task-diff/build', input);
+  }
+
+  async taskCodeGraphChangeGet(taskId: string, codeGraphId: string): Promise<TaskCodeGraphChange> {
+    return this.post('/v3/code-graph/task-diff/get', { task_id: taskId, code_graph_id: codeGraphId });
+  }
+
+  async taskCodeGraphChangeStatus(
+    taskId: string,
+    codeGraphId: string,
+    status: TaskCodeGraphChangeStatus,
+  ): Promise<TaskCodeGraphChange> {
+    return this.post('/v3/code-graph/task-diff/status', { task_id: taskId, code_graph_id: codeGraphId, status });
   }
 }

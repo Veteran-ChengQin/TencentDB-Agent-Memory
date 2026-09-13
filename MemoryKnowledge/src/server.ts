@@ -71,6 +71,7 @@ export function createApp() {
   }));
   api.route("/code-graph", createCodeGraphRoutes({
     cgService: knowledgeModule.cgService,
+    taskCodeGraphChangeService: knowledgeModule.taskCodeGraphChangeService,
     instancePool: knowledgeModule.instancePool,
     publicBaseUrl: config.publicBaseUrl,
   }));

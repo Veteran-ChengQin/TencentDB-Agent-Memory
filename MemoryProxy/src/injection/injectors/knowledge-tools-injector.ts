@@ -37,6 +37,8 @@ import {
   type KnowledgeItem,
 } from "../../knowledge/core-client.js";
 import type { CoreSkillConfig } from "../../types.js";
+import { getMetadataClient } from "../../meta/client.js";
+import type { TaskDetail } from "../../session/types.js";
 
 const TAG = "[knowledge-tools-injector]";
 
@@ -94,6 +96,19 @@ function filterResourcesByCapabilities(
     if (r.type === "code-graph") return caps.code_graph !== false;
     return true;
   });
+}
+
+export function applyTaskCanonicalProject(
+  resources: KnowledgeItem[],
+  taskScopedIds: Set<string>,
+  canonicalProject: string | undefined,
+): KnowledgeItem[] {
+  if (!canonicalProject) return resources;
+  return resources.map((resource) => (
+    taskScopedIds.has(resource.knowledge_id) && resource.type === "code-graph"
+      ? { ...resource, repo_slug: canonicalProject }
+      : resource
+  ));
 }
 
 /**
@@ -268,6 +283,7 @@ export class KnowledgeToolsInjector implements InjectionHook {
       ids.userKey,
       ids.spaceId,
       ids.assetCapabilities,
+      ids.taskDetail,
       "execute",
       {
         sessionKey: toCompositeSessionKey(ctx.metadata.sessionKey, ctx.metadata.agentSource),
@@ -289,6 +305,7 @@ export class KnowledgeToolsInjector implements InjectionHook {
       input.callerUserKey ?? null,
       input.sessionInfo.space_id ?? null,
       input.assetCapabilities,
+      input.taskDetail ?? null,
       "prewarm",
       {
         sessionKey: toCompositeSessionKey(input.keyId, input.agentSource),
@@ -308,6 +325,7 @@ export class KnowledgeToolsInjector implements InjectionHook {
     userKey: string | null;
     spaceId: string | null;
     assetCapabilities?: AssetCapabilityFlags;
+    taskDetail: TaskDetail | null;
   } {
     const custom = ctx.metadata.custom as Record<string, unknown> | undefined;
     const session = custom?.session as Record<string, unknown> | undefined;
@@ -317,7 +335,8 @@ export class KnowledgeToolsInjector implements InjectionHook {
     const userKey = typeof custom?.userKey === "string" && custom.userKey.length > 0 ? custom.userKey : null;
     const spaceId = typeof session?.space_id === "string" && session.space_id.length > 0 ? session.space_id : null;
     const assetCapabilities = custom?.assetCapabilities as AssetCapabilityFlags | undefined;
-    return { teamId, agentId, userId, userKey, spaceId, assetCapabilities };
+    const taskDetail = (custom?.taskDetail as TaskDetail | null | undefined) ?? null;
+    return { teamId, agentId, userId, userKey, spaceId, assetCapabilities, taskDetail };
   }
 
   private async fetchBlocks(
@@ -326,6 +345,7 @@ export class KnowledgeToolsInjector implements InjectionHook {
     userKey: string | null,
     spaceId: string | null,
     assetCapabilities: AssetCapabilityFlags | undefined,
+    taskDetail: TaskDetail | null,
     phase: "prewarm" | "execute",
     telemetryContext: KnowledgeTelemetryContext,
   ): Promise<ContextBlock[]> {
@@ -338,12 +358,37 @@ export class KnowledgeToolsInjector implements InjectionHook {
       // serviceId 透传 spaceId（与 SkillInjector 一致：`/{agent}/{spaceId}/...`）。
       let resources: KnowledgeItem[];
       let scope: string;
-      if (agentId && userKey) {
-        const ids = await client.listAgentKnowledgeIds(agentId, userKey, { serviceId: spaceId ?? undefined });
-        console.log(`${TAG} ${phase} per-agent path: listAgentKnowledgeIds → ${ids.length} ids [${ids.join(",")}]`);
+      let taskScopedIds = new Set<string>();
+      if (userKey && telemetryContext.userId) {
+        const fixedIds = agentId
+          ? await client.listAgentKnowledgeIds(agentId, userKey, { serviceId: spaceId ?? undefined })
+          : [];
+        const requestedTaskIds = taskDetail?.assetUsage?.enabledAssets
+          .filter((asset) => asset.assetType === "llm_wiki" || asset.assetType === "code_graph")
+          .map((asset) => asset.assetId) ?? [];
+
+        let permittedTaskIds: string[] = [];
+        if (requestedTaskIds.length > 0) {
+          const metadata = getMetadataClient(
+            this.config.coreSkill,
+            spaceId || this.config.coreSkill.serviceId,
+            userKey,
+          );
+          const accessible = await metadata.listAccessibleAssets({
+            user_id: telemetryContext.userId,
+            team_id: teamId,
+            action: "read",
+          });
+          const accessibleIds = new Set(accessible.map((asset) => asset.asset_id));
+          permittedTaskIds = requestedTaskIds.filter((id) => accessibleIds.has(id));
+        }
+        taskScopedIds = new Set(permittedTaskIds);
+
+        const ids = [...new Set([...fixedIds, ...permittedTaskIds])];
+        console.log(`${TAG} ${phase} scoped path: fixed=${fixedIds.length} task=${permittedTaskIds.length} ids [${ids.join(",")}]`);
         resources = ids.length > 0 ? await client.listKnowledgeByIds(teamId, ids, { serviceId: spaceId ?? undefined }) : [];
         console.log(`${TAG} ${phase} per-agent path: listKnowledgeByIds → ${resources.length} resources`);
-        scope = `agent:${agentId}`;
+        scope = `agent:${agentId ?? "none"}:task:${taskDetail?.id ?? "none"}`;
       } else {
         // Fallback：无 caller 身份 → team 全量。
         // 传 space_id 作 kernel 租户路由 header（与 SkillInjector 一致）。
@@ -353,6 +398,11 @@ export class KnowledgeToolsInjector implements InjectionHook {
       }
 
       resources = filterResourcesByCapabilities(resources, assetCapabilities);
+      // Task 快照 CKG 可以托管在个人/团队 Fork；其 clone URL 与当前工作区的
+      // canonical project 不同。对 Task 明确启用的图谱，用 Task 项目标识作为
+      // match 锚点，不改变底层 CKG 查询与索引逻辑。
+      const canonicalProject = taskDetail?.assetUsage?.projectKey;
+      resources = applyTaskCanonicalProject(resources, taskScopedIds, canonicalProject);
       // 注入 prompt 里给 LLM 用的 service-id 也要是 spaceId（LLM 拿它调 KS 的 tools/list|call）。
       const injectionServiceId = spaceId || this.config.coreSkill.serviceId;
       const content = renderKnowledgeToolsBlock(resources, injectionServiceId, telemetryContext);

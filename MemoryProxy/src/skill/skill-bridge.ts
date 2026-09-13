@@ -34,6 +34,7 @@ import { getMetadataClient } from "../meta/client.js";
 import type { ProxyConfig } from "../types.js";
 import { emitBridgeToolCallTelemetry, emitBridgeRejectTelemetry, agentSourceFromSessionKey } from "../memory/bridge-telemetry.js";
 import { getCoreSkillClient, type CoreSkillClient } from "./core-client.js";
+import { parseTaskAssetUsage } from "../session/task-asset-usage.js";
 
 /**
  * 二选一的 pin repo（KvVersionPinRepo 或 VersionPinRepo）——
@@ -193,6 +194,7 @@ interface SessionIdFields {
   user_id: string;
   team_id: string;
   agent_id: string;
+  task_id?: string;
   /**
    * URL 路径侧的 agentSource（`claude-code` / `codebuddy` ...）—— 用于
    * Repo 三段隔离键。从 SessionStore 里存储 session 的 keyId 反解出来
@@ -256,6 +258,7 @@ function stateToIdFields(
     user_id: s.user_id,
     team_id: s.team_id,
     agent_id: s.agent_id,
+    task_id: s.task_id,
     agent_source: agentSource,
     space_id: s.space_id,
     user_key: s.user_key,
@@ -275,6 +278,7 @@ function bindingToIdFields(
     user_id: binding.userId,
     team_id: binding.teamId,
     agent_id: binding.agentId,
+    task_id: binding.taskId,
     agent_source: agentSource,
     space_id: spaceId,
     user_key: binding.userKey,
@@ -717,7 +721,45 @@ export function createSkillBridgeHandler(
         team_id: ids.team_id,
         agent_id: ids.agent_id,
         user_id: ids.user_id,
+        ...(ids.task_id ? { task_id: ids.task_id } : {}),
       };
+
+      // A Task-linked Skill is deliberately not added to the Agent's fixed
+      // loadout. Resolve a selected task skill by name and transparently route
+      // skill_view (get-by-name) to the id-based get endpoint for this session.
+      if (sub === "get-by-name" && ids.task_id && ids.user_key) {
+        const requestedName = typeof inboundBody.skill_name === "string"
+          ? inboundBody.skill_name.trim()
+          : "";
+        if (requestedName) {
+          try {
+            const metadata = getMetadataClient(
+              config.coreSkill,
+              ids.space_id || config.coreSkill.serviceId,
+              ids.user_key,
+            );
+            const task = await metadata.getTask(ids.task_id);
+            const selected = parseTaskAssetUsage(task.metadata_json)?.enabledAssets.find(
+              (asset) => asset.assetType === "skill" && asset.name === requestedName,
+            );
+            if (selected) {
+              const accessible = await metadata.listAccessibleAssets({
+                user_id: ids.user_id,
+                team_id: ids.team_id,
+                asset_type: "skill",
+                action: "read",
+              });
+              if (accessible.some((asset) => asset.asset_id === selected.assetId)) {
+                upstreamSubpathOverride = "get";
+                delete outbound.skill_name;
+                outbound.skill_id = selected.assetId;
+              }
+            }
+          } catch (err) {
+            console.warn(`${TAG} task skill resolution failed: ${(err as Error).message}`);
+          }
+        }
+      }
       // For "search" subpath: stamp scope="team" so the handler skips
       // agent_id owner-filtering → team-wide search.
       if (isTeamWideSearch) {

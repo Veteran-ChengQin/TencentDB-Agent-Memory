@@ -151,6 +151,57 @@ export interface CodeGraphToolResult {
   isError: boolean;
 }
 
+export type TaskCodeGraphChangeStatus = 'candidate' | 'merged' | 'obsolete';
+
+export interface TaskCodeGraphDiff {
+  files: Array<{ path: string; change_type: 'added' | 'modified' | 'deleted'; additions: number; deletions: number }>;
+  entities: Array<{
+    stable_key: string;
+    name: string;
+    kind: string;
+    path: string;
+    change_type: 'added' | 'modified' | 'deleted';
+    before_signature?: string;
+    after_signature?: string;
+    line?: number;
+  }>;
+  relations: Array<{
+    stable_key: string;
+    source: string;
+    target: string;
+    kind: 'imports' | 'calls' | 'inherits';
+    path: string;
+    change_type: 'added' | 'modified' | 'deleted';
+  }>;
+  summary: { files: number; entities: number; relations: number; added: number; modified: number; deleted: number };
+}
+
+export interface TaskCodeGraphChange {
+  change_id: string;
+  task_id: string;
+  code_graph_id: string;
+  base_commit: string;
+  result_commit: string | null;
+  result_snapshot: string | null;
+  graph_commit: string | null;
+  status: TaskCodeGraphChangeStatus;
+  diff: TaskCodeGraphDiff;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BuildTaskCodeGraphChangeInput {
+  team_id: string;
+  task_id: string;
+  code_graph_id: string;
+  base_commit: string;
+  result_commit?: string;
+  result_snapshot?: string;
+  patch: string;
+  before_files?: Record<string, string>;
+  after_files?: Record<string, string>;
+}
+
 // ── Port ──
 
 export interface KnowledgeClientPort {
@@ -186,4 +237,7 @@ export interface KnowledgeClientPort {
   codeGraphDelete(codeGraphIds: string[]): Promise<BatchDeleteResult>;
   codeGraphUpdateMeta(codeGraphId: string, patch: { repo_name?: string; summary?: string | null }): Promise<CodeGraphDetail>;
   codeGraphQuery(codeGraphId: string, tool: string, params: Record<string, unknown>): Promise<CodeGraphToolResult>;
+  taskCodeGraphChangeBuild(input: BuildTaskCodeGraphChangeInput): Promise<TaskCodeGraphChange>;
+  taskCodeGraphChangeGet(taskId: string, codeGraphId: string): Promise<TaskCodeGraphChange>;
+  taskCodeGraphChangeStatus(taskId: string, codeGraphId: string, status: TaskCodeGraphChangeStatus): Promise<TaskCodeGraphChange>;
 }

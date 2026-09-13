@@ -9,6 +9,7 @@ import type { Hono } from 'hono';
 import { validatePanelMetaHeaders } from '../../middleware/validate-panel-headers.js';
 import { respondControlError } from '../../envelope.js';
 import type { PanelDeps } from '../../../panel-deps.js';
+import { publishTaskSnapshot } from '../../../services/task-snapshot-publisher.js';
 import { respondEnvelope } from '../../envelope.js';
 import {
   buildCtx,
@@ -153,6 +154,131 @@ export function registerKnowledgeCodeGraphRoutes(api: Hono, deps: PanelDeps): vo
     if ('error' in gate) return gate.error;
     const kc = deps.knowledgeClientFactory(ctx.instanceId);
     return runKs(c, () => kc.codeGraphSync(cgId));
+  });
+
+  // Task 结果快照：把 base commit + Agent patch 发布到受控 GitHub 分支，
+  // 然后复用既有 codeGraphCreate 链路建立一个完整、可直接查询的 CKG。
+  api.post('/knowledge/code-graph/task-snapshot/create', mw, async (c) => {
+    const ctx = buildCtx(c);
+    const body = await readJson(c);
+    const teamId = str(body, 'team_id');
+    const taskId = str(body, 'task_id');
+    const sourceRepoUrl = str(body, 'source_repo_url');
+    const canonicalProject = str(body, 'canonical_project');
+    const baseCommit = str(body, 'base_commit');
+    if (!teamId) return respondControlError(c, 400, 'MISSING_TEAM_ID');
+    if (!taskId) return respondControlError(c, 400, 'MISSING_TASK_ID');
+    if (!sourceRepoUrl) return respondControlError(c, 400, 'MISSING_REPO_URL');
+    if (!canonicalProject) return respondControlError(c, 400, 'MISSING_CANONICAL_PROJECT');
+    if (!baseCommit) return respondControlError(c, 400, 'MISSING_BASE_COMMIT');
+    if (typeof body.patch !== 'string') return respondControlError(c, 400, 'MISSING_PATCH');
+
+    const gate = await requireTeamMember(deps, c, ctx, teamId);
+    if ('error' in gate) return gate.error;
+    const taskEnv = await deps.metaKernel.invoke('task/get', { task_id: taskId }, ctx);
+    const task = taskEnv.data as { team_id?: string; title?: string } | null;
+    if (taskEnv.code !== 0 || !task) return respondControlError(c, 404, 'TASK_NOT_FOUND');
+    if (task.team_id !== teamId) return respondControlError(c, 403, 'TASK_TEAM_MISMATCH');
+
+    try {
+      const snapshot = await publishTaskSnapshot({
+        taskId,
+        sourceRepoUrl,
+        canonicalProject,
+        baseCommit,
+        patch: body.patch,
+        taskTitle: task.title,
+      });
+      const kc = deps.knowledgeClientFactory(ctx.instanceId);
+      const detail = await kc.codeGraphCreate(
+        teamId,
+        snapshot.repoUrl,
+        snapshot.branch,
+        gate.userId,
+        `Task 快照 · ${canonicalProject} · ${taskId}`,
+      );
+      if (ctx.userKey) {
+        deps.knowledgeTaskRegistry.record({
+          knowledge_id: detail.code_graph_id,
+          type: 'code-graph',
+          team_id: teamId,
+          owner_user_id: gate.userId,
+          owner_user_key: ctx.userKey,
+          service_id: ctx.instanceId,
+          created_at: Date.now(),
+        });
+      }
+      return respondEnvelope(c, okEnvelope(c, { code_graph: detail, snapshot }));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      deps.logger.error('[task-snapshot] publish failed', { task_id: taskId, message });
+      return respondControlError(c, 502, message);
+    }
+  });
+
+  // Task delta: records a task contribution without mutating the shared project graph.
+  api.post('/knowledge/code-graph/task-diff/build', mw, async (c) => {
+    const ctx = buildCtx(c);
+    const body = await readJson(c);
+    const teamId = str(body, 'team_id');
+    const taskId = str(body, 'task_id');
+    const cgId = str(body, 'code_graph_id');
+    const baseCommit = str(body, 'base_commit');
+    if (!teamId) return respondControlError(c, 400, 'MISSING_TEAM_ID');
+    if (!taskId) return respondControlError(c, 400, 'MISSING_TASK_ID');
+    if (!cgId) return respondControlError(c, 400, 'MISSING_CODE_GRAPH_ID');
+    if (!baseCommit) return respondControlError(c, 400, 'MISSING_BASE_COMMIT');
+    if (typeof body.patch !== 'string') return respondControlError(c, 400, 'MISSING_PATCH');
+    const memberGate = await requireTeamMember(deps, c, ctx, teamId);
+    if ('error' in memberGate) return memberGate.error;
+    const readGate = await requireKnowledgeRead(deps, c, ctx, cgId);
+    if ('error' in readGate) return readGate.error;
+    const kc = deps.knowledgeClientFactory(ctx.instanceId);
+    return runKs(c, () => kc.taskCodeGraphChangeBuild({
+      team_id: teamId,
+      task_id: taskId,
+      code_graph_id: cgId,
+      base_commit: baseCommit,
+      result_commit: str(body, 'result_commit') ?? undefined,
+      result_snapshot: str(body, 'result_snapshot') ?? undefined,
+      patch: body.patch as string,
+      before_files: body.before_files && typeof body.before_files === 'object'
+        ? body.before_files as Record<string, string>
+        : undefined,
+      after_files: body.after_files && typeof body.after_files === 'object'
+        ? body.after_files as Record<string, string>
+        : undefined,
+    }));
+  });
+
+  api.post('/knowledge/code-graph/task-diff/get', mw, async (c) => {
+    const ctx = buildCtx(c);
+    const body = await readJson(c);
+    const taskId = str(body, 'task_id');
+    const cgId = str(body, 'code_graph_id');
+    if (!taskId) return respondControlError(c, 400, 'MISSING_TASK_ID');
+    if (!cgId) return respondControlError(c, 400, 'MISSING_CODE_GRAPH_ID');
+    const gate = await requireKnowledgeRead(deps, c, ctx, cgId);
+    if ('error' in gate) return gate.error;
+    const kc = deps.knowledgeClientFactory(ctx.instanceId);
+    return runKs(c, () => kc.taskCodeGraphChangeGet(taskId, cgId));
+  });
+
+  api.post('/knowledge/code-graph/task-diff/status', mw, async (c) => {
+    const ctx = buildCtx(c);
+    const body = await readJson(c);
+    const taskId = str(body, 'task_id');
+    const cgId = str(body, 'code_graph_id');
+    const status = str(body, 'status');
+    if (!taskId) return respondControlError(c, 400, 'MISSING_TASK_ID');
+    if (!cgId) return respondControlError(c, 400, 'MISSING_CODE_GRAPH_ID');
+    if (status !== 'candidate' && status !== 'merged' && status !== 'obsolete') {
+      return respondControlError(c, 400, 'INVALID_TASK_CODE_GRAPH_STATUS');
+    }
+    const gate = await requireKnowledgeRead(deps, c, ctx, cgId, { action: 'write' });
+    if ('error' in gate) return gate.error;
+    const kc = deps.knowledgeClientFactory(ctx.instanceId);
+    return runKs(c, () => kc.taskCodeGraphChangeStatus(taskId, cgId, status));
   });
 
   // C5 delete — 删三处：KS + entity_knowledge 明细 + meta_asset（见 §0.6）

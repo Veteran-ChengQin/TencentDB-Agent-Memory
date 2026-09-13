@@ -56,6 +56,13 @@ export type {
   SyncResult,
 } from "./code-graph-service.js";
 
+export { TaskCodeGraphChangeService } from "./task-code-graph-change-service.js";
+export type {
+  TaskCodeGraphChange,
+  TaskCodeGraphChangeStatus,
+  BuildTaskCodeGraphChangeInput,
+} from "./task-code-graph-change-service.js";
+
 export { WikiService } from "./wiki-service.js";
 export type {
   WikiWorker,
