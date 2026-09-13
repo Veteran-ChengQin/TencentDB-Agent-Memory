@@ -1,0 +1,17 @@
+{
+  "models": [
+    {
+      "id": "__MODEL_ID__",
+      "name": "TDAI 团队资产代理（CodeBuddy）",
+      "vendor": "OpenAI",
+      "apiKey": "__TDAI_USER_KEY__",
+      "maxInputTokens": 128000,
+      "maxOutputTokens": 16384,
+      "url": "__TDAI_PROXY_URL__",
+      "supportsToolCall": true,
+      "supportsImages": false,
+      "supportsReasoning": true
+    }
+  ],
+  "availableModels": ["__MODEL_ID__"]
+}

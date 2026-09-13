@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "instance_id": "mwaskom__seaborn-3079",
+  "repository": "https://github.com/mwaskom/seaborn.git",
+  "source_url": "https://github.com/mwaskom/seaborn/issues/3079",
+  "reference_pr": "https://github.com/mwaskom/seaborn/pull/3454",
+  "base_commit": "01fddcfa8724ff0e9aea475d9370051a0f5ef73c",
+  "golden_commit": "6c72a618cc3ff52bb927dd8bc12945af12d807d2",
+  "default_branch": "issue-3079-codebuddy",
+  "conda_environment": "seaborn-3079-bugfix",
+  "work_image": "tdai/seaborn-3079:base",
+  "tdai_task_id": "task-e84lqbtfie",
+  "tdai_agent_id": "agt-df61l8eana",
+  "model": "gpt-5.6-sol",
+  "max_turns": 500,
+  "fail_to_pass": [
+    "tests/_tdai_3079_f2p.py::test_move_legend_relabels_without_reordering_handles",
+    "tests/_tdai_3079_f2p.py::test_move_legend_rejects_wrong_label_count"
+  ],
+  "pass_to_pass": [
+    "tests/test_utils.py::test_move_legend_matplotlib_objects",
+    "tests/test_utils.py::test_move_legend_grid_object",
+    "tests/test_utils.py::test_move_legend_input_checks",
+    "tests/test_utils.py::test_desaturate",
+    "tests/test_utils.py::test_saturate",
+    "tests/test_utils.py::test_relative_luminance"
+  ]
+}

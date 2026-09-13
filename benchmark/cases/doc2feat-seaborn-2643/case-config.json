@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "instance_id": "mwaskom__seaborn-2643",
+  "repository": "https://github.com/mwaskom/seaborn.git",
+  "source_url": "https://github.com/mwaskom/seaborn/pull/2643",
+  "base_commit": "091f4c0e4f3580a8060de5596fa64c1ff9454dc5",
+  "reference_merge_commit": "f4a5076",
+  "default_branch": "doc2feat-2643-codebuddy",
+  "conda_environment": "doc2feat-seaborn-2643",
+  "fail_to_pass": [
+    "seaborn/tests/test_utils.py::test_move_legend_input_checks",
+    "seaborn/tests/test_utils.py::test_load_datasets",
+    "seaborn/tests/test_utils.py::test_move_legend_matplotlib_objects",
+    "seaborn/tests/test_utils.py::test_move_legend_grid_object"
+  ],
+  "pass_to_pass": [
+    "seaborn/tests/test_utils.py::test_draw_figure",
+    "seaborn/tests/test_utils.py::test_get_dataset_names",
+    "seaborn/tests/test_utils.py::test_desaturate",
+    "seaborn/tests/test_utils.py::test_saturate",
+    "seaborn/tests/test_utils.py::test_assign_default_kwargs",
+    "seaborn/tests/test_utils.py::test_relative_luminance"
+  ]
+}
